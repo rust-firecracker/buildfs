@@ -1,55 +1,69 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-pub struct Config {
-    pub filesystem: FilesystemConfig,
-    pub container: ContainerConfig,
+pub struct BuildScript {
+    pub filesystem: BuildScriptFilesystem,
+    pub container: BuildScriptContainer,
     #[serde(default)]
-    pub scripts: Vec<ScriptConfig>,
+    pub commands: Vec<BuildScriptCommand>,
     #[serde(default)]
-    pub overlays: Vec<OverlayConfig>,
+    pub overlays: Vec<BuildScriptOverlay>,
     #[serde(default)]
-    pub export: ExportConfig,
+    pub export: BuildScriptExport,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct FilesystemConfig {
+pub struct BuildScriptFilesystem {
     #[serde(default)]
     pub preferred_name: Option<String>,
     #[serde(default, rename = "type")]
-    pub filesystem_type: FsFilesystemType,
+    pub filesystem_type: FilesystemType,
     pub size_mib: u32,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct ContainerConfig {
+pub struct BuildScriptContainer {
     #[serde(default)]
-    pub engine: FsContainerEngine,
+    pub engine: ContainerEngine,
     pub image: String,
     #[serde(default)]
     pub rootful: bool,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct ScriptConfig {
+pub struct BuildScriptCommand {
+    // only one of these can be specified
     #[serde(default)]
-    pub shell: Option<String>,
+    pub command: Option<String>,
     #[serde(default)]
-    pub content: Option<String>,
+    pub script: Option<String>,
     #[serde(default)]
-    pub path: Option<PathBuf>,
+    pub script_path: Option<PathBuf>,
+    // options addable to any
+    #[serde(default)]
+    pub uid: Option<u32>,
+    #[serde(default)]
+    pub gid: Option<u32>,
+    #[serde(default)]
+    pub working_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub privileged: Option<bool>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub tty: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct OverlayConfig {
+pub struct BuildScriptOverlay {
     pub source: PathBuf,
     pub destination: PathBuf,
 }
 
 #[derive(Deserialize, Debug, Default)]
-pub struct ExportConfig {
+pub struct BuildScriptExport {
     #[serde(default)]
     pub files: Export,
     #[serde(default)]
@@ -67,14 +81,14 @@ pub struct Export {
 }
 
 #[derive(Deserialize, Debug, Default)]
-pub enum FsContainerEngine {
+pub enum ContainerEngine {
     #[default]
     Docker,
     Podman,
 }
 
 #[derive(Deserialize, Debug, Default)]
-pub enum FsFilesystemType {
+pub enum FilesystemType {
     #[default]
     Ext4,
     Btrfs,

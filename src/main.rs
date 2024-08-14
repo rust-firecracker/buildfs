@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use package::{pack_command, unpack_command};
 use serde::{Deserialize, Serialize};
 
+mod package;
 mod schema;
 
 #[derive(Parser, Debug, Clone)]
@@ -18,10 +20,15 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum CliCommand {
-    #[command(about = "Pack or unpack a package that can be executed by buildfs")]
-    Package {
+    #[command(about = "Pack a build script with its dependencies into an executable package")]
+    Pack {
         #[command(flatten)]
-        args: PackageArgs,
+        args: PackArgs,
+    },
+    #[command(about = "Unpack an executable package's build script and dependencies")]
+    Unpack {
+        #[command(flatten)]
+        args: PackArgs,
     },
     #[command(about = "Dry-run an executable package to determine whether it is correctly configured")]
     DryRun {
@@ -36,13 +43,8 @@ pub enum CliCommand {
 }
 
 #[derive(Args, Clone, Debug)]
-pub struct PackageArgs {
-    #[arg(
-        long = "source",
-        short = 's',
-        help = "The path of the source config to pack",
-        default_value = "config.toml"
-    )]
+pub struct PackArgs {
+    #[arg(long = "source", short = 's', help = "The path of the build script to pack")]
     source_path: PathBuf,
     #[arg(
         long = "dest",
@@ -52,8 +54,6 @@ pub struct PackageArgs {
     destination_path: PathBuf,
     #[arg(long = "type", short = 't', help = "The package's type", value_enum, default_value_t)]
     package_type: PackageType,
-    #[command(flatten)]
-    pack_or_unpack: PackOrUnpackGroup,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -81,27 +81,22 @@ pub enum PackageType {
     #[default]
     Tarball,
     Tar,
-    Zip,
+    Directory,
+    OnlyBuildScript,
 }
 
-#[derive(Args, Debug, Clone)]
-#[group(required = true, multiple = false)]
-pub struct PackOrUnpackGroup {
-    #[arg(
-        long = "unpack",
-        short = 'U',
-        help = "Unpack the source package into the destination directory"
-    )]
-    unpack: bool,
-    #[arg(
-        long = "pack",
-        short = 'P',
-        help = "Pack the source config into the destination package"
-    )]
-    pack: bool,
-}
-
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let cli = Cli::parse();
-    dbg!(cli);
+
+    match cli.command {
+        CliCommand::Pack { args } => {
+            pack_command(args).await;
+        }
+        CliCommand::Unpack { args } => {
+            unpack_command(args).await;
+        }
+        CliCommand::DryRun { args } => todo!(),
+        CliCommand::Run { args } => todo!(),
+    }
 }
