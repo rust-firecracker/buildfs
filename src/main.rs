@@ -44,13 +44,9 @@ pub enum CliCommand {
 
 #[derive(Args, Clone, Debug)]
 pub struct PackArgs {
-    #[arg(long = "source", short = 's', help = "The path of the build script to pack")]
+    #[arg(help = "The path of the build script to pack")]
     source_path: PathBuf,
-    #[arg(
-        long = "dest",
-        short = 'd',
-        help = "The path to the destination package/unpack directory"
-    )]
+    #[arg(help = "The path to the destination package/unpack location")]
     destination_path: PathBuf,
     #[arg(long = "type", short = 't', help = "The package's type", value_enum, default_value_t)]
     package_type: PackageType,
