@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use dry_run::dry_run_command;
 use package::{pack_command, unpack_command};
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +95,9 @@ async fn main() {
         CliCommand::Unpack { args } => {
             unpack_command(args).await;
         }
-        CliCommand::DryRun { args } => todo!(),
-        CliCommand::Run { args } => todo!(),
+        CliCommand::DryRun { args } => {
+            dry_run_command(args).await;
+        }
+        CliCommand::Run { args: _ } => todo!(),
     }
 }
