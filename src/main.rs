@@ -4,6 +4,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use package::{pack_command, unpack_command};
 use serde::{Deserialize, Serialize};
 
+mod container_engine;
+mod dry_run;
 mod package;
 mod schema;
 
@@ -78,7 +80,7 @@ pub enum PackageType {
     Tarball,
     Tar,
     Directory,
-    OnlyBuildScript,
+    BuildScript,
 }
 
 #[tokio::main(flavor = "current_thread")]

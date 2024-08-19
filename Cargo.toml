@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.15", features = ["derive"] }
+bollard = { version = "0.17.1" }
+clap = { version = "4.5.16", features = ["derive"] }
 flate2 = "1.0.31"
-serde = { version = "1.0.207", features = ["derive"] }
+libc = "0.2.158"
+podman-rest-client = { version = "0.11.0", default-features = false, features = [
+    "v5",
+    "uds",
+] }
+serde = { version = "1.0.208", features = ["derive"] }
 tar = "0.4.41"
-tokio = { version = "1.39.2", features = [
+tokio = { version = "1.39.3", features = [
     "rt",
     "process",
     "rt",
@@ -16,3 +22,4 @@ tokio = { version = "1.39.2", features = [
     "fs",
 ] }
 toml = "0.8.19"
+uuid = { version = "1.10.0", features = ["v4"] }

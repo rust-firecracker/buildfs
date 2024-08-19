@@ -5,7 +5,7 @@ use tokio::task::JoinSet;
 
 use crate::{schema::BuildScript, PackArgs, PackageType};
 
-static BUILD_SCRIPT_NAME: &'static str = "build.toml";
+pub static BUILD_SCRIPT_FILENAME: &'static str = "build.toml";
 
 pub async fn unpack_command(pack_args: PackArgs) {
     tokio::fs::create_dir_all(&pack_args.destination_path)
@@ -39,7 +39,7 @@ pub async fn unpack_command(pack_args: PackArgs) {
 }
 
 pub async fn pack_command(pack_args: PackArgs) {
-    if let PackageType::OnlyBuildScript = pack_args.package_type {
+    if let PackageType::BuildScript = pack_args.package_type {
         tokio::fs::copy(pack_args.source_path, pack_args.destination_path)
             .await
             .expect("Could not copy build script to its destination path");
@@ -63,7 +63,7 @@ pub async fn pack_command(pack_args: PackArgs) {
     let mut paths = HashMap::with_capacity(1);
     paths.insert(
         pack_args.source_path.clone(),
-        pack_args.destination_path.join(BUILD_SCRIPT_NAME),
+        pack_args.destination_path.join(BUILD_SCRIPT_FILENAME),
     );
 
     for command in build_script.commands {

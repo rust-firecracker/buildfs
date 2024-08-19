@@ -26,10 +26,12 @@ pub struct BuildScriptFilesystem {
 #[derive(Deserialize, Debug)]
 pub struct BuildScriptContainer {
     #[serde(default)]
-    pub engine: ContainerEngine,
+    pub engine: ContainerEngineType,
     pub image: String,
     #[serde(default)]
     pub rootful: bool,
+    #[serde(default)]
+    pub connection_uri: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -81,7 +83,7 @@ pub struct Export {
 }
 
 #[derive(Deserialize, Debug, Default)]
-pub enum ContainerEngine {
+pub enum ContainerEngineType {
     #[default]
     Docker,
     Podman,
