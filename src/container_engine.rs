@@ -1,27 +1,59 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, pin::Pin, process::Stdio};
 
 use async_trait::async_trait;
-use bollard::{container::CreateContainerOptions, ClientVersion, Docker};
-use futures::StreamExt;
+use bollard::{
+    container::{CreateContainerOptions, LogOutput},
+    exec::{CreateExecOptions, StartExecResults},
+    ClientVersion, Docker,
+};
+use futures::{Stream, StreamExt, TryStreamExt};
 use podman_rest_client::{
     v5::{
         apis::{Containers, Images, System},
-        models::{BindOptions, SpecGenerator},
+        models::{BindOptions, Mount, SpecGenerator},
         params::ImagePullLibpod,
     },
     PodmanRestClient,
 };
+use tokio::{
+    io::AsyncReadExt,
+    process::{Child, ChildStdout, Command},
+};
 use uuid::Uuid;
 
-use crate::schema::BuildScriptContainer;
+use crate::schema::{BuildScriptContainer, BuildScriptContainerImage};
 
 #[async_trait]
 pub trait ContainerEngine {
     async fn ping(&self);
 
-    async fn pull_image(&self, image: &str);
+    async fn pull_image(&self, image: &BuildScriptContainerImage);
 
-    async fn start_container(&self, container: BuildScriptContainer, extra_volumes: HashMap<PathBuf, PathBuf>);
+    async fn start_container(
+        &self,
+        container: BuildScriptContainer,
+        extra_volumes: HashMap<PathBuf, PathBuf>,
+    ) -> String;
+
+    async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader>;
+}
+
+#[async_trait]
+pub trait ExecReader {
+    async fn read(&mut self) -> Option<String>;
+}
+
+pub struct ExecParams<'a> {
+    pub container_name: &'a str,
+    pub cmd: String,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub working_dir: Option<PathBuf>,
+    pub privileged: Option<bool>,
+    pub env: HashMap<String, String>,
+    pub attach_stdout: Option<bool>,
+    pub attach_stderr: Option<bool>,
+    pub attach_stdin: Option<bool>,
 }
 
 pub struct PodmanContainerEngine {
@@ -61,22 +93,26 @@ impl ContainerEngine for PodmanContainerEngine {
             .expect("Pinging libpod failed");
     }
 
-    async fn pull_image(&self, image: &str) {
+    async fn pull_image(&self, image: &BuildScriptContainerImage) {
         self.client
             .image_pull_libpod(Some(ImagePullLibpod {
-                reference: Some(image),
+                reference: Some(image.full_name().as_str()),
                 ..Default::default()
             }))
             .await
             .expect("Could not pull image via libpod");
     }
 
-    async fn start_container(&self, container: BuildScriptContainer, mut extra_volumes: HashMap<PathBuf, PathBuf>) {
+    async fn start_container(
+        &self,
+        container: BuildScriptContainer,
+        mut extra_volumes: HashMap<PathBuf, PathBuf>,
+    ) -> String {
         let name = Uuid::new_v4().to_string();
         extra_volumes.extend(container.volumes);
 
         let spec_generator = SpecGenerator {
-            image: Some(container.image),
+            image: Some(container.image.full_name()),
             privileged: Some(container.rootful),
             terminal: Some(true),
             remove: Some(true),
@@ -90,7 +126,7 @@ impl ContainerEngine for PodmanContainerEngine {
             mounts: Some(
                 extra_volumes
                     .into_iter()
-                    .map(|(src, dst)| podman_rest_client::v5::models::Mount {
+                    .map(|(src, dst)| Mount {
                         bind_options: Some(BindOptions {
                             create_mountpoint: Some(true),
                             ..Default::default()
@@ -115,6 +151,67 @@ impl ContainerEngine for PodmanContainerEngine {
             .container_start_libpod(&name, None)
             .await
             .expect("Could not start container via libpod");
+
+        name
+    }
+
+    async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
+        let podman_path = which::which("podman").expect("Could not locate \"podman\" binary to perform exec via CLI");
+        log::info!("Located \"podman\" binary at {podman_path:?}");
+
+        let mut command = Command::new(podman_path);
+        command.arg("exec");
+
+        if let Some(uid_gid_string) = format_uid_gid_string(exec_params.uid, exec_params.gid) {
+            command.arg("--user");
+            command.arg(uid_gid_string);
+        }
+
+        command.arg("--tty");
+
+        if let Some(working_dir) = exec_params.working_dir {
+            command.arg("--workdir");
+            command.arg(working_dir);
+        }
+
+        if let Some(true) = exec_params.privileged {
+            command.arg("--privileged");
+        }
+
+        for (env_key, env_value) in exec_params.env {
+            command.arg(format!("--env={env_key}={env_value}"));
+        }
+
+        command.stdout(Stdio::piped());
+
+        let mut child = command.spawn().expect("Could not spawn \"podman\" binary for exec");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("Could not pipe stdout of \"podman\" binary for reading exec output");
+        Box::new(PodmanExecReader { child, stdout })
+    }
+}
+
+struct PodmanExecReader {
+    child: Child,
+    stdout: ChildStdout,
+}
+
+#[async_trait]
+impl ExecReader for PodmanExecReader {
+    async fn read(&mut self) -> Option<String> {
+        if let Ok(Some(exit_status)) = self.child.try_wait() {
+            if !exit_status.success() {
+                log::error!("Podman exec CLI command exited with non-zero status: {exit_status}");
+            }
+
+            return None;
+        }
+
+        let mut buf = Vec::new();
+        self.stdout.read(&mut buf).await.ok()?;
+        String::from_utf8(buf).ok()
     }
 }
 
@@ -155,15 +252,11 @@ impl ContainerEngine for DockerContainerEngine {
         }
     }
 
-    async fn pull_image(&self, image: &str) {
-        let (_, tag) = image
-            .split_once(":")
-            .expect("Image could not be split to tag and not tag");
-
+    async fn pull_image(&self, image: &BuildScriptContainerImage) {
         let mut stream = self.client.create_image(
             Some(bollard::image::CreateImageOptions {
-                from_image: image,
-                tag,
+                from_image: image.full_name(),
+                tag: image.tag.clone(),
                 ..Default::default()
             }),
             None,
@@ -175,12 +268,16 @@ impl ContainerEngine for DockerContainerEngine {
         }
     }
 
-    async fn start_container(&self, container: BuildScriptContainer, mut extra_volumes: HashMap<PathBuf, PathBuf>) {
+    async fn start_container(
+        &self,
+        container: BuildScriptContainer,
+        mut extra_volumes: HashMap<PathBuf, PathBuf>,
+    ) -> String {
         extra_volumes.extend(container.volumes);
 
         let name = Uuid::new_v4().to_string();
         let config = bollard::container::Config {
-            image: Some(container.image),
+            image: Some(container.image.full_name()),
             tty: Some(true),
             hostname: container.hostname,
             env: Some(
@@ -221,5 +318,76 @@ impl ContainerEngine for DockerContainerEngine {
             .start_container::<String>(&name, None)
             .await
             .expect("Could not start container via Docker daemon");
+
+        name
+    }
+
+    async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
+        let response = self
+            .client
+            .create_exec(
+                exec_params.container_name,
+                CreateExecOptions::<String> {
+                    attach_stdin: exec_params.attach_stdin,
+                    attach_stdout: exec_params.attach_stdout,
+                    attach_stderr: exec_params.attach_stderr,
+                    tty: Some(true),
+                    env: Some(
+                        exec_params
+                            .env
+                            .into_iter()
+                            .map(|(key, value)| format!("{key}={value}"))
+                            .collect(),
+                    ),
+                    cmd: Some(exec_params.cmd.split_whitespace().map(|s| s.to_owned()).collect()),
+                    privileged: exec_params.privileged,
+                    user: format_uid_gid_string(exec_params.uid, exec_params.gid),
+                    working_dir: exec_params
+                        .working_dir
+                        .map(|path_buf| path_buf.to_string_lossy().to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Could not create exec via Docker daemon");
+
+        let output = match self
+            .client
+            .start_exec(&response.id, None)
+            .await
+            .expect("Could not start exec via Docker daemon")
+        {
+            StartExecResults::Attached { output, input: _ } => output,
+            StartExecResults::Detached => panic!("Attaching to Docker daemon exec failed"),
+        };
+
+        Box::new(DockerExecReader { output })
+    }
+}
+
+struct DockerExecReader {
+    output: Pin<Box<dyn Stream<Item = Result<LogOutput, bollard::errors::Error>> + Send>>,
+}
+
+#[async_trait]
+impl ExecReader for DockerExecReader {
+    async fn read(&mut self) -> Option<String> {
+        let bytes = match self.output.try_next().await.ok()?? {
+            LogOutput::StdErr { message } => message,
+            LogOutput::StdOut { message } => message,
+            LogOutput::StdIn { message } => message,
+            LogOutput::Console { message } => message,
+        };
+        String::from_utf8(bytes.to_vec()).ok()
+    }
+}
+
+fn format_uid_gid_string(uid: Option<u32>, gid: Option<u32>) -> Option<String> {
+    match uid {
+        Some(uid) => match gid {
+            Some(gid) => Some(format!("{}:{}", uid.to_string(), gid.to_string())),
+            None => Some(uid.to_string()),
+        },
+        None => None,
     }
 }

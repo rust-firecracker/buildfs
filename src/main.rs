@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dry_run::dry_run_command;
+use log::Level;
 use package::{pack_command, unpack_command};
 use run::run_command;
 use serde::{Deserialize, Serialize};
@@ -90,8 +91,21 @@ pub enum PackageType {
     BuildScript,
 }
 
+impl Display for PackageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackageType::TarGz => write!(f, "TarGz"),
+            PackageType::Tar => write!(f, "Tar"),
+            PackageType::Directory => write!(f, "Directory"),
+            PackageType::BuildScript => write!(f, "BuildScript"),
+        }
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    simple_logger::init_with_level(Level::Info).expect("Could not initialize simple_logger");
+
     let cli = Cli::parse();
 
     match cli.command {

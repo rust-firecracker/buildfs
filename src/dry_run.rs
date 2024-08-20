@@ -33,6 +33,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             (tmp_path.clone(), tmp_path.join(BUILD_SCRIPT_FILENAME))
         }
     };
+    log::info!("Unpacked package during run into {unpack_path:?}. Build script located at {build_script_path:?}");
 
     let build_script_json = tokio::fs::read_to_string(build_script_path)
         .await
@@ -48,6 +49,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             build_script.container.connection_uri.clone(),
         )),
     };
+    log::info!("Connected to container engine {}", build_script.container.engine);
 
     let references = build_script
         .commands
@@ -71,7 +73,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             )
         }
     } else {
-        for reference_path in references {
+        for reference_path in &references {
             if !reference_path.is_absolute() {
                 panic!(
                     "Build script validation failed: {} reference isn't absolute (relative to package root)",
@@ -88,6 +90,17 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             }
         }
     }
+
+    let empty_commands = build_script
+        .commands
+        .iter()
+        .filter(|command| command.script.is_none() && command.script_path.is_none() && command.command.is_none())
+        .count();
+    if empty_commands > 0 {
+        panic!("Build script validation failed: {empty_commands} command(s) contain no reference to a script, a script path or an inline command");
+    }
+
+    log::info!("Validated the build script: {} reference(s) found", references.len());
 
     (build_script, container_engine, unpack_path)
 }

@@ -8,22 +8,27 @@ use crate::{schema::BuildScript, PackArgs, PackageType, UnpackArgs};
 pub static BUILD_SCRIPT_FILENAME: &'static str = "build.toml";
 
 pub async fn get_package_type(path: &PathBuf) -> PackageType {
-    let metadata = tokio::fs::metadata(path)
-        .await
-        .expect("Could not inspect file/directory metadata");
-    if metadata.is_dir() {
-        return PackageType::Directory;
-    }
-
-    let extension = path.extension().expect("File has no extension").to_string_lossy();
-    match extension.to_string().as_str() {
-        "toml" => PackageType::BuildScript,
-        "tar" => PackageType::Tar,
-        "tar.gz" => PackageType::TarGz,
-        _ => {
-            panic!("File extension {extension} is not recognizable as a type of package");
+    let package_type = {
+        let metadata = tokio::fs::metadata(path)
+            .await
+            .expect("Could not inspect file/directory metadata");
+        if metadata.is_dir() {
+            return PackageType::Directory;
         }
-    }
+
+        let extension = path.extension().expect("File has no extension").to_string_lossy();
+        match extension.to_string().as_str() {
+            "toml" => PackageType::BuildScript,
+            "tar" => PackageType::Tar,
+            "tar.gz" => PackageType::TarGz,
+            _ => {
+                panic!("File extension {extension} is not recognizable as a type of package");
+            }
+        }
+    };
+    log::info!("Detected package type of {path:?} to be {package_type}");
+
+    package_type
 }
 
 pub async fn unpack_command(unpack_args: UnpackArgs) {
@@ -33,24 +38,34 @@ pub async fn unpack_command(unpack_args: UnpackArgs) {
         .expect("Could not ensure that the destination directory exists");
 
     tokio::task::spawn_blocking(move || {
-        let file = File::open(unpack_args.source_path).expect("Could not open source file representing the package");
+        let file = File::open(&unpack_args.source_path).expect("Could not open source file representing the package");
 
         match package_type {
             PackageType::TarGz => {
                 let gz_decoder = flate2::read::GzDecoder::new(file);
                 let mut archive = tar::Archive::new(gz_decoder);
                 archive
-                    .unpack(unpack_args.destination_path)
+                    .unpack(&unpack_args.destination_path)
                     .expect("Extracting package tarball failed");
+                log::info!(
+                    "Extraction of {:?} into {:?} finished",
+                    unpack_args.source_path,
+                    unpack_args.destination_path
+                );
             }
             PackageType::Tar => {
                 let mut archive = tar::Archive::new(file);
                 archive
-                    .unpack(unpack_args.destination_path)
+                    .unpack(&unpack_args.destination_path)
                     .expect("Extracting package tar failed");
+                log::info!(
+                    "Extraction of {:?} into {:?} finished",
+                    unpack_args.source_path,
+                    unpack_args.destination_path
+                );
             }
-            _ => {
-                println!("The given package type is not meant to be unpacked")
+            package_type => {
+                log::warn!("Tried to unpack a package of type {package_type}, which cannot be unpacked");
             }
         }
     })

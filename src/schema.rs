@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fmt::Display, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -27,7 +27,7 @@ pub struct BuildScriptFilesystem {
 pub struct BuildScriptContainer {
     #[serde(default)]
     pub engine: ContainerEngineType,
-    pub image: String,
+    pub image: BuildScriptContainerImage,
     #[serde(default)]
     pub rootful: bool,
     #[serde(default)]
@@ -46,6 +46,18 @@ pub struct BuildScriptContainer {
     pub cap_add: Option<Vec<String>>,
     #[serde(default)]
     pub cap_drop: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BuildScriptContainerImage {
+    pub name: String,
+    pub tag: String,
+}
+
+impl BuildScriptContainerImage {
+    pub fn full_name(&self) -> String {
+        format!("{}:{}", self.name, self.tag)
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -69,7 +81,11 @@ pub struct BuildScriptCommand {
     #[serde(default)]
     pub env: HashMap<String, String>,
     #[serde(default)]
-    pub tty: Option<bool>,
+    pub attach_stdout: Option<bool>,
+    #[serde(default)]
+    pub attach_stdin: Option<bool>,
+    #[serde(default)]
+    pub attach_stderr: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -101,6 +117,15 @@ pub enum ContainerEngineType {
     #[default]
     Docker,
     Podman,
+}
+
+impl Display for ContainerEngineType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContainerEngineType::Docker => write!(f, "Docker"),
+            ContainerEngineType::Podman => write!(f, "Podman"),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Default)]
