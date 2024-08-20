@@ -88,6 +88,8 @@ pub struct BuildScriptOverlay {
     #[serde(default)]
     pub source_inline: Option<String>,
     pub destination: PathBuf,
+    #[serde(default)]
+    pub is_directory: bool,
 }
 
 #[derive(Deserialize, Debug, Default)]

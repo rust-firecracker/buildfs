@@ -1,12 +1,13 @@
 use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf};
 
-use tokio::{process::Command, task::JoinSet};
+use sys_mount::{Mount, UnmountDrop, UnmountFlags};
+use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
 use uuid::Uuid;
 
 use crate::{
     container_engine::{ContainerEngine, ExecParams},
     dry_run::{prepare_for_run, AdjoinAbsolute},
-    schema::{BuildScript, BuildScriptCommand, FilesystemType},
+    schema::{BuildScript, BuildScriptCommand, BuildScriptOverlay, FilesystemType},
     RunArgs,
 };
 
@@ -31,17 +32,20 @@ pub async fn run_command(run_args: RunArgs) {
         &container_name,
         &run_args,
         can_delete_unpack_path,
-        unpack_path,
+        &unpack_path,
         inline_mount_paths,
     )
     .await;
 
-    init_rootfs(
+    let (rootfs_mount_path, unmount_drop) = init_rootfs(
         build_script.filesystem.filesystem_type,
         build_script.filesystem.size_mib,
         build_script.filesystem.dd_block_size_mib,
+        &run_args,
     )
     .await;
+
+    apply_overlays_and_finalize(rootfs_mount_path, build_script.overlays, &unpack_path, unmount_drop).await;
 }
 
 async fn pull_and_start_container(
@@ -144,7 +148,7 @@ async fn export_and_remove_container(
     container_name: &str,
     run_args: &RunArgs,
     can_delete_unpack_path: bool,
-    unpack_path: PathBuf,
+    unpack_path: &PathBuf,
     inline_mount_paths: HashMap<String, (PathBuf, PathBuf)>,
 ) {
     let container_rootfs_tar_path = get_tmp_path();
@@ -179,6 +183,7 @@ async fn export_and_remove_container(
     }
 
     if can_delete_unpack_path {
+        let unpack_path = unpack_path.clone();
         cleanup_join_set.spawn_blocking(move || std::fs::remove_dir_all(unpack_path));
     }
 
@@ -191,7 +196,12 @@ async fn export_and_remove_container(
     log::info!("Cleaned up all temporary resources");
 }
 
-async fn init_rootfs(filesystem_type: FilesystemType, size_mib: u32, dd_block_size_mib: Option<u32>) {
+async fn init_rootfs(
+    filesystem_type: FilesystemType,
+    size_mib: u32,
+    dd_block_size_mib: Option<u32>,
+    run_args: &RunArgs,
+) -> (PathBuf, UnmountDrop<Mount>) {
     let dd_block_size_mib = match dd_block_size_mib {
         Some(mib) => mib,
         None => 1,
@@ -211,10 +221,9 @@ async fn init_rootfs(filesystem_type: FilesystemType, size_mib: u32, dd_block_si
     log::debug!("Located \"dd\" binary at: {dd_path:?}");
 
     let mut dd_command = Command::new(dd_path);
-    let rootfs_path = get_tmp_path();
     let rootfs_mount_path = get_tmp_path();
     dd_command.arg("if=/dev/zero");
-    dd_command.arg(format!("of={}", rootfs_path.to_string_lossy()));
+    dd_command.arg(format!("of={}", run_args.output_path.to_string_lossy()));
     dd_command.arg(format!("bs={}M", dd_block_size_mib));
     dd_command.arg(format!("count={}", size_mib / dd_block_size_mib));
     let dd_exit_status = dd_command.status().await.expect("Failed to fork \"dd\" process");
@@ -224,28 +233,83 @@ async fn init_rootfs(filesystem_type: FilesystemType, size_mib: u32, dd_block_si
     }
 
     let mut mkfs_command = Command::new(mkfs_path);
-    mkfs_command.arg(rootfs_path.to_string_lossy().to_string());
+    mkfs_command.arg(run_args.output_path.to_string_lossy().to_string());
     let mkfs_exit_status = mkfs_command.status().await.expect("Failed to fork \"mkfs\" process");
 
     if !mkfs_exit_status.success() {
         panic!("\"mkfs\" invocation failed with exit status: {mkfs_exit_status}");
     }
 
-    log::info!("Ran \"dd\" and \"mkfs\" to initialize an empty filesystem blob at {rootfs_path:?}");
+    log::info!(
+        "Ran \"dd\" and \"mkfs\" to initialize an empty filesystem blob at {:?}",
+        run_args.output_path
+    );
 
     tokio::fs::create_dir(&rootfs_mount_path)
         .await
         .expect("Could not create filesystem mount point directory");
-    let mut mount_command = Command::new(which::which("mount").expect("Could not locate \"mount\" in PATH"));
-    mount_command.arg(&rootfs_path);
-    mount_command.arg(&rootfs_mount_path);
-    let mount_exit_status = mount_command.status().await.expect("Failed to fork \"mount\" process");
+    let unmount_drop = Mount::builder()
+        .fstype("ext4")
+        .mount_autodrop(&run_args.output_path, &rootfs_mount_path, UnmountFlags::empty())
+        .expect("Could not mount rootfs");
 
-    if !mount_exit_status.success() {
-        panic!("\"mount\" invocation failed with exit status: {mount_exit_status}");
+    (rootfs_mount_path, unmount_drop)
+}
+
+async fn apply_overlays_and_finalize(
+    rootfs_mount_path: PathBuf,
+    overlays: Vec<BuildScriptOverlay>,
+    unpack_path: &PathBuf,
+    unmount_drop: UnmountDrop<Mount>,
+) {
+    for overlay in overlays {
+        if overlay.is_directory {
+            let rootfs_mount_path = rootfs_mount_path.clone();
+            let unpack_path = unpack_path.clone();
+
+            tokio::task::spawn_blocking(move || {
+                fs_extra::dir::copy(
+                    unpack_path.adjoin_absolute(&overlay.source.unwrap()),
+                    rootfs_mount_path.adjoin_absolute(&overlay.destination),
+                    &fs_extra::dir::CopyOptions::default(),
+                )
+            })
+            .await
+            .expect("Join on blocking task failed")
+            .expect("Recursively copying overlay failed");
+
+            continue;
+        }
+
+        if let Some(parent_path) = overlay.destination.parent() {
+            tokio::fs::create_dir_all(rootfs_mount_path.adjoin_absolute(parent_path))
+                .await
+                .expect("Could not create parent directory tree for overlayed file");
+        }
+
+        if let Some(source_path) = overlay.source {
+            tokio::fs::copy(
+                unpack_path.adjoin_absolute(&source_path),
+                rootfs_mount_path.adjoin_absolute(&overlay.destination),
+            )
+            .await
+            .expect("Could not copy overlayed file");
+        }
+
+        if let Some(source_inline) = overlay.source_inline {
+            let mut file = tokio::fs::File::options()
+                .create_new(true)
+                .write(true)
+                .open(rootfs_mount_path.adjoin_absolute(&overlay.destination))
+                .await
+                .expect("Could not create and open overlayed inline file");
+            file.write_all(source_inline.as_bytes())
+                .await
+                .expect("Could not write overlayed inline file's contents");
+        }
     }
 
-    log::info!("Mounted filesystem at {rootfs_path:?} to {rootfs_mount_path:?}");
+    drop(unmount_drop);
 }
 
 fn get_tmp_path() -> PathBuf {

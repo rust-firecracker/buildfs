@@ -117,6 +117,17 @@ pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn
         panic!("Build script validation failed: {empty_overlays} overlay(s) contain no references to a source path or an inline source");
     }
 
+    let conflicting_overlays = build_script
+        .overlays
+        .iter()
+        .filter(|overlay| overlay.is_directory && overlay.source_inline.is_some())
+        .count();
+    if conflicting_overlays > 0 {
+        panic!(
+            "Build script validation failed: {conflicting_overlays} overlay(s) are inline but are marked as directories"
+        );
+    }
+
     log::debug!("Validated the build script: {} reference(s) found", references.len());
 
     if let Some(block_size_mib) = build_script.filesystem.dd_block_size_mib {
