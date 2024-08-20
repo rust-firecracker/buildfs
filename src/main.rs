@@ -7,11 +7,11 @@ use package::{pack_command, unpack_command};
 use run::run_command;
 use serde::{Deserialize, Serialize};
 
-mod container_engine;
-mod dry_run;
-mod package;
-mod run;
-mod schema;
+pub mod container_engine;
+pub mod dry_run;
+pub mod package;
+pub mod run;
+pub mod schema;
 
 #[derive(Parser, Debug, Clone)]
 #[command(

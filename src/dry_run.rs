@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::{
-    container_engine::{ContainerEngine, DockerContainerEngine, PodmanContainerEngine},
+    container_engine::{docker::DockerContainerEngine, podman::PodmanContainerEngine, ContainerEngine},
     package::{get_package_type, unpack_command, BUILD_SCRIPT_FILENAME},
     schema::{BuildScript, ContainerEngineType},
     DryRunArgs, PackageType, UnpackArgs,
