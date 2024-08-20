@@ -104,7 +104,7 @@ impl Display for PackageType {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    simple_logger::init_with_level(Level::Info).expect("Could not initialize simple_logger");
+    simple_logger::init_with_level(Level::Debug).expect("Could not initialize simple_logger");
 
     let cli = Cli::parse();
 

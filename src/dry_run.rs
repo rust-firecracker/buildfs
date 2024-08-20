@@ -10,12 +10,13 @@ use crate::{
 };
 
 pub async fn dry_run_command(dry_run_args: DryRunArgs) {
-    let (_, container_engine, _) = prepare_for_run(dry_run_args).await;
+    let (_, container_engine, _, _) = prepare_for_run(dry_run_args).await;
     container_engine.ping().await;
 }
 
-pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf) {
+pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf, bool) {
     let package_type = get_package_type(&dry_run_args.package).await;
+    let mut can_delete = false;
 
     let (unpack_path, build_script_path) = match package_type {
         PackageType::BuildScript => (dry_run_args.package.clone(), dry_run_args.package),
@@ -24,6 +25,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             dry_run_args.package.join(BUILD_SCRIPT_FILENAME),
         ),
         _ => {
+            can_delete = false;
             let tmp_path = PathBuf::from(format!("/tmp/{}", Uuid::new_v4()));
             unpack_command(UnpackArgs {
                 source_path: dry_run_args.package,
@@ -33,13 +35,14 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             (tmp_path.clone(), tmp_path.join(BUILD_SCRIPT_FILENAME))
         }
     };
-    log::info!("Unpacked package during run into {unpack_path:?}. Build script located at {build_script_path:?}");
+    log::info!("Unpacked package into {unpack_path:?} with build script located at {build_script_path:?}");
 
-    let build_script_json = tokio::fs::read_to_string(build_script_path)
+    let build_script_json = tokio::fs::read_to_string(&build_script_path)
         .await
         .expect("Could not read build script from temporary location");
     let build_script =
         toml::from_str::<BuildScript>(&build_script_json).expect("Could not decode build script from TOML");
+    log::debug!("Read build script at {build_script_path:?}");
 
     let container_engine: Box<dyn ContainerEngine> = match build_script.container.engine {
         ContainerEngineType::Docker => Box::new(DockerContainerEngine::new(
@@ -100,9 +103,9 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
         panic!("Build script validation failed: {empty_commands} command(s) contain no reference to a script, a script path or an inline command");
     }
 
-    log::info!("Validated the build script: {} reference(s) found", references.len());
+    log::debug!("Validated the build script: {} reference(s) found", references.len());
 
-    (build_script, container_engine, unpack_path)
+    (build_script, container_engine, unpack_path, can_delete)
 }
 
 pub trait AdjoinAbsolute {

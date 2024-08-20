@@ -32,10 +32,12 @@ impl PodmanContainerEngine {
             Some(uri) => uri,
             None => {
                 let uid = unsafe { libc::geteuid() };
-                match uid {
+                let resolved_uri = match uid {
                     0 => "unix:///run/podman/podman.sock".to_string(),
                     other => format!("unix:///run/user/{other}/podman/podman.sock"),
-                }
+                };
+                log::debug!("Podman connection URI was resolved to {resolved_uri}");
+                resolved_uri
             }
         };
 
@@ -123,7 +125,7 @@ impl ContainerEngine for PodmanContainerEngine {
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
         let podman_path = which::which("podman").expect("Could not locate \"podman\" binary to perform exec via CLI");
-        log::info!("Located \"podman\" binary at {podman_path:?}");
+        log::debug!("Located \"podman\" binary at {podman_path:?}");
 
         let mut command = Command::new(podman_path);
         command.arg("exec");
