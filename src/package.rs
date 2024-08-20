@@ -19,7 +19,7 @@ pub async fn get_package_type(path: &PathBuf) -> PackageType {
     match extension.to_string().as_str() {
         "toml" => PackageType::BuildScript,
         "tar" => PackageType::Tar,
-        "tar.gz" => PackageType::Tarball,
+        "tar.gz" => PackageType::TarGz,
         _ => {
             panic!("File extension {extension} is not recognizable as a type of package");
         }
@@ -36,7 +36,7 @@ pub async fn unpack_command(unpack_args: UnpackArgs) {
         let file = File::open(unpack_args.source_path).expect("Could not open source file representing the package");
 
         match package_type {
-            PackageType::Tarball => {
+            PackageType::TarGz => {
                 let gz_decoder = flate2::read::GzDecoder::new(file);
                 let mut archive = tar::Archive::new(gz_decoder);
                 archive
@@ -125,7 +125,7 @@ pub async fn pack_command(pack_args: PackArgs) {
 
         let file = File::create(pack_args.destination_path).expect("Could not create destination file");
 
-        if let PackageType::Tarball = pack_args.package_type {
+        if let PackageType::TarGz = pack_args.package_type {
             let gz_encoder = flate2::write::GzEncoder::new(file, Compression::best());
             let mut tar = tar::Builder::new(gz_encoder);
             tar.append_dir_all(".", &tmp_destination_path)

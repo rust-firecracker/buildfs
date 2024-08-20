@@ -83,7 +83,7 @@ pub struct RunArgs {
 #[derive(ValueEnum, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub enum PackageType {
-    Tarball,
+    TarGz,
     Tar,
     Directory,
     #[default]

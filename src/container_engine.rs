@@ -2,10 +2,12 @@ use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 use bollard::{container::CreateContainerOptions, ClientVersion, Docker};
+use futures::StreamExt;
 use podman_rest_client::{
     v5::{
-        apis::{Containers, System},
+        apis::{Containers, Images, System},
         models::{BindOptions, SpecGenerator},
+        params::ImagePullLibpod,
     },
     PodmanRestClient,
 };
@@ -16,6 +18,8 @@ use crate::schema::BuildScriptContainer;
 #[async_trait]
 pub trait ContainerEngine {
     async fn ping(&self);
+
+    async fn pull_image(&self, image: &str);
 
     async fn start_container(&self, container: BuildScriptContainer, extra_volumes: HashMap<PathBuf, PathBuf>);
 }
@@ -57,6 +61,16 @@ impl ContainerEngine for PodmanContainerEngine {
             .expect("Pinging libpod failed");
     }
 
+    async fn pull_image(&self, image: &str) {
+        self.client
+            .image_pull_libpod(Some(ImagePullLibpod {
+                reference: Some(image),
+                ..Default::default()
+            }))
+            .await
+            .expect("Could not pull image via libpod");
+    }
+
     async fn start_container(&self, container: BuildScriptContainer, mut extra_volumes: HashMap<PathBuf, PathBuf>) {
         let name = Uuid::new_v4().to_string();
         extra_volumes.extend(container.volumes);
@@ -90,7 +104,6 @@ impl ContainerEngine for PodmanContainerEngine {
             ),
             ..Default::default()
         };
-        dbg!(&spec_generator);
 
         let _ = self
             .client
@@ -139,6 +152,26 @@ impl ContainerEngine for DockerContainerEngine {
 
         if !response.contains("OK") {
             panic!("Ping response from Docker daemon is not OK: {response}");
+        }
+    }
+
+    async fn pull_image(&self, image: &str) {
+        let (_, tag) = image
+            .split_once(":")
+            .expect("Image could not be split to tag and not tag");
+
+        let mut stream = self.client.create_image(
+            Some(bollard::image::CreateImageOptions {
+                from_image: image,
+                tag,
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+
+        while let Some(result) = stream.next().await {
+            result.expect("Could not pull image via Docker daemon");
         }
     }
 
