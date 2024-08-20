@@ -31,7 +31,7 @@ pub enum CliCommand {
     #[command(about = "Unpack an executable package's build script and dependencies")]
     Unpack {
         #[command(flatten)]
-        args: PackArgs,
+        args: UnpackArgs,
     },
     #[command(about = "Dry-run an executable package to determine whether it is correctly configured")]
     DryRun {
@@ -46,20 +46,24 @@ pub enum CliCommand {
 }
 
 #[derive(Args, Clone, Debug)]
-pub struct PackArgs {
-    #[arg(help = "The path of the build script to pack")]
+pub struct UnpackArgs {
+    #[arg(help = "The path of the package to unpack")]
     source_path: PathBuf,
-    #[arg(help = "The path to the destination package/unpack location")]
+    #[arg(help = "The path to the location of the unpacked content(s)")]
     destination_path: PathBuf,
-    #[arg(long = "type", short = 't', help = "The package's type", value_enum, default_value_t)]
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PackArgs {
+    source_path: PathBuf,
+    destination_path: PathBuf,
+    #[arg(long = "type", short = 't', help = "The type of package to produce")]
     package_type: PackageType,
 }
 
 #[derive(Args, Clone, Debug)]
 pub struct DryRunArgs {
     package: PathBuf,
-    #[arg(long = "type", short = 't', help = "The package's type", value_enum, default_value_t)]
-    package_type: PackageType,
 }
 
 #[derive(Args, Clone, Debug)]

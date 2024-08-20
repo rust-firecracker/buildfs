@@ -1,39 +1,61 @@
-use std::{collections::HashMap, fs::File};
+use std::{collections::HashMap, fs::File, path::PathBuf};
 
 use flate2::Compression;
 use tokio::task::JoinSet;
 
-use crate::{schema::BuildScript, PackArgs, PackageType};
+use crate::{schema::BuildScript, PackArgs, PackageType, UnpackArgs};
 
 pub static BUILD_SCRIPT_FILENAME: &'static str = "build.toml";
 
-pub async fn unpack_command(pack_args: PackArgs) {
-    tokio::fs::create_dir_all(&pack_args.destination_path)
+pub async fn get_package_type(path: &PathBuf) -> PackageType {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .expect("Could not inspect file/directory metadata");
+    if metadata.is_dir() {
+        return PackageType::Directory;
+    }
+
+    let extension = path.extension().expect("File has no extension").to_string_lossy();
+    match extension.to_string().as_str() {
+        "toml" => PackageType::BuildScript,
+        "tar" => PackageType::Tar,
+        "tar.gz" => PackageType::Tarball,
+        _ => {
+            panic!("File extension {extension} is not recognizable as a type of package");
+        }
+    }
+}
+
+pub async fn unpack_command(unpack_args: UnpackArgs) {
+    let package_type = get_package_type(&unpack_args.source_path).await;
+    tokio::fs::create_dir_all(&unpack_args.destination_path)
         .await
         .expect("Could not ensure that the destination directory exists");
 
     tokio::task::spawn_blocking(move || {
-        let file = File::open(pack_args.source_path).expect("Could not open source file representing the package");
+        let file = File::open(unpack_args.source_path).expect("Could not open source file representing the package");
 
-        match pack_args.package_type {
+        match package_type {
             PackageType::Tarball => {
                 let gz_decoder = flate2::read::GzDecoder::new(file);
                 let mut archive = tar::Archive::new(gz_decoder);
                 archive
-                    .unpack(pack_args.destination_path)
+                    .unpack(unpack_args.destination_path)
                     .expect("Extracting package tarball failed");
             }
             PackageType::Tar => {
                 let mut archive = tar::Archive::new(file);
                 archive
-                    .unpack(pack_args.destination_path)
+                    .unpack(unpack_args.destination_path)
                     .expect("Extracting package tar failed");
             }
-            _ => {}
+            _ => {
+                println!("The given package type is not meant to be unpacked")
+            }
         }
     })
     .await
-    .expect("Blocking task for extraction failed");
+    .expect("Join on blocking task failed");
 }
 
 pub async fn pack_command(pack_args: PackArgs) {

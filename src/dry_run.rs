@@ -4,28 +4,30 @@ use uuid::Uuid;
 
 use crate::{
     container_engine::{ContainerEngine, DockerContainerEngine, PodmanContainerEngine},
-    package::{unpack_command, BUILD_SCRIPT_FILENAME},
+    package::{get_package_type, unpack_command, BUILD_SCRIPT_FILENAME},
     schema::{BuildScript, ContainerEngineType},
-    DryRunArgs, PackArgs, PackageType,
+    DryRunArgs, PackageType, UnpackArgs,
 };
 
 pub async fn dry_run_command(dry_run_args: DryRunArgs) {
-    let (build_script, container_engine, build_script_path) = prepare_for_run(dry_run_args).await;
+    let (_, container_engine, _) = prepare_for_run(dry_run_args).await;
+    container_engine.ping().await;
 }
 
 pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf) {
-    let (unpack_path, build_script_path) = match dry_run_args.package_type {
+    let package_type = get_package_type(&dry_run_args.package).await;
+
+    let (unpack_path, build_script_path) = match package_type {
         PackageType::BuildScript => (dry_run_args.package.clone(), dry_run_args.package),
         PackageType::Directory => (
             dry_run_args.package.clone(),
             dry_run_args.package.join(BUILD_SCRIPT_FILENAME),
         ),
-        package_type => {
+        _ => {
             let tmp_path = PathBuf::from(format!("/tmp/{}", Uuid::new_v4()));
-            unpack_command(PackArgs {
+            unpack_command(UnpackArgs {
                 source_path: dry_run_args.package,
                 destination_path: tmp_path.clone(),
-                package_type,
             })
             .await;
             (tmp_path.clone(), tmp_path.join(BUILD_SCRIPT_FILENAME))
@@ -55,7 +57,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
         .chain(build_script.overlays.iter().map(|overlay| &overlay.source))
         .collect::<Vec<_>>();
 
-    if let PackageType::BuildScript = dry_run_args.package_type {
+    if let PackageType::BuildScript = package_type {
         if !references.is_empty() {
             panic!(
                 "Build script validation failed: A non-packaged script contains {} reference(s) to outside resources",

@@ -1,7 +1,14 @@
+use async_trait::async_trait;
 use bollard::{ClientVersion, Docker};
-use podman_rest_client::PodmanRestClient;
+use podman_rest_client::{
+    v5::apis::{System, SystemCompat},
+    PodmanRestClient,
+};
 
-pub trait ContainerEngine {}
+#[async_trait]
+pub trait ContainerEngine {
+    async fn ping(&self);
+}
 
 pub struct PodmanContainerEngine {
     client: PodmanRestClient,
@@ -14,8 +21,8 @@ impl PodmanContainerEngine {
             None => {
                 let uid = unsafe { libc::geteuid() };
                 match uid {
-                    0 => "/run/podman/podman.sock".to_string(),
-                    other => format!("/run/user/{other}/podman/podman.sock"),
+                    0 => "unix:///run/podman/podman.sock".to_string(),
+                    other => format!("unix:///run/user/{other}/podman/podman.sock"),
                 }
             }
         };
@@ -31,7 +38,15 @@ impl PodmanContainerEngine {
     }
 }
 
-impl ContainerEngine for PodmanContainerEngine {}
+#[async_trait]
+impl ContainerEngine for PodmanContainerEngine {
+    async fn ping(&self) {
+        self.client
+            .system_version_libpod()
+            .await
+            .expect("Pinging libpod failed");
+    }
+}
 
 pub struct DockerContainerEngine {
     client: Docker,
@@ -60,4 +75,13 @@ impl DockerContainerEngine {
     }
 }
 
-impl ContainerEngine for DockerContainerEngine {}
+#[async_trait]
+impl ContainerEngine for DockerContainerEngine {
+    async fn ping(&self) {
+        let response = self.client.ping().await.expect("Pinging Docker daemon failed");
+
+        if !response.contains("OK") {
+            panic!("Ping response from Docker daemon is not OK: {response}");
+        }
+    }
+}
