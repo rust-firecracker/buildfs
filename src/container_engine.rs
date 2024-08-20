@@ -16,7 +16,7 @@ use podman_rest_client::{
     PodmanRestClient,
 };
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncBufReadExt, BufReader, Lines},
     process::{Child, ChildStdout, Command},
 };
 use uuid::Uuid;
@@ -33,7 +33,7 @@ pub trait ContainerEngine {
         &self,
         container: BuildScriptContainer,
         extra_volumes: HashMap<PathBuf, PathBuf>,
-    ) -> String;
+    ) -> (String, String);
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader>;
 }
@@ -45,15 +45,13 @@ pub trait ExecReader {
 
 pub struct ExecParams<'a> {
     pub container_name: &'a str,
+    pub container_id: &'a str,
     pub cmd: String,
     pub uid: Option<u32>,
     pub gid: Option<u32>,
     pub working_dir: Option<PathBuf>,
     pub privileged: Option<bool>,
     pub env: HashMap<String, String>,
-    pub attach_stdout: Option<bool>,
-    pub attach_stderr: Option<bool>,
-    pub attach_stdin: Option<bool>,
 }
 
 pub struct PodmanContainerEngine {
@@ -107,8 +105,8 @@ impl ContainerEngine for PodmanContainerEngine {
         &self,
         container: BuildScriptContainer,
         mut extra_volumes: HashMap<PathBuf, PathBuf>,
-    ) -> String {
-        let name = Uuid::new_v4().to_string();
+    ) -> (String, String) {
+        let container_name = Uuid::new_v4().to_string();
         extra_volumes.extend(container.volumes);
 
         let spec_generator = SpecGenerator {
@@ -122,7 +120,7 @@ impl ContainerEngine for PodmanContainerEngine {
             timeout: container.timeout,
             cap_add: container.cap_add,
             cap_drop: container.cap_drop,
-            name: Some(name.clone()),
+            name: Some(container_name.clone()),
             mounts: Some(
                 extra_volumes
                     .into_iter()
@@ -141,18 +139,18 @@ impl ContainerEngine for PodmanContainerEngine {
             ..Default::default()
         };
 
-        let _ = self
+        let response = self
             .client
             .container_create_libpod(spec_generator)
             .await
             .expect("Could not create container via libpod");
 
         self.client
-            .container_start_libpod(&name, None)
+            .container_start_libpod(&container_name, None)
             .await
             .expect("Could not start container via libpod");
 
-        name
+        (response.id, container_name)
     }
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
@@ -182,6 +180,12 @@ impl ContainerEngine for PodmanContainerEngine {
             command.arg(format!("--env={env_key}={env_value}"));
         }
 
+        command.arg(exec_params.container_id);
+
+        for segment in exec_params.cmd.split_whitespace() {
+            command.arg(segment);
+        }
+
         command.stdout(Stdio::piped());
 
         let mut child = command.spawn().expect("Could not spawn \"podman\" binary for exec");
@@ -189,13 +193,16 @@ impl ContainerEngine for PodmanContainerEngine {
             .stdout
             .take()
             .expect("Could not pipe stdout of \"podman\" binary for reading exec output");
-        Box::new(PodmanExecReader { child, stdout })
+        Box::new(PodmanExecReader {
+            child,
+            stdout_reader: BufReader::new(stdout).lines(),
+        })
     }
 }
 
 struct PodmanExecReader {
     child: Child,
-    stdout: ChildStdout,
+    stdout_reader: Lines<BufReader<ChildStdout>>,
 }
 
 #[async_trait]
@@ -209,9 +216,7 @@ impl ExecReader for PodmanExecReader {
             return None;
         }
 
-        let mut buf = Vec::new();
-        self.stdout.read(&mut buf).await.ok()?;
-        String::from_utf8(buf).ok()
+        self.stdout_reader.next_line().await.ok()?
     }
 }
 
@@ -272,10 +277,10 @@ impl ContainerEngine for DockerContainerEngine {
         &self,
         container: BuildScriptContainer,
         mut extra_volumes: HashMap<PathBuf, PathBuf>,
-    ) -> String {
+    ) -> (String, String) {
         extra_volumes.extend(container.volumes);
 
-        let name = Uuid::new_v4().to_string();
+        let container_name = Uuid::new_v4().to_string();
         let config = bollard::container::Config {
             image: Some(container.image.full_name()),
             tty: Some(true),
@@ -303,10 +308,11 @@ impl ContainerEngine for DockerContainerEngine {
             ..Default::default()
         };
 
-        self.client
+        let response = self
+            .client
             .create_container(
                 Some(CreateContainerOptions {
-                    name: &name,
+                    name: &container_name,
                     platform: None,
                 }),
                 config,
@@ -315,11 +321,11 @@ impl ContainerEngine for DockerContainerEngine {
             .expect("Could not create container via Docker daemon");
 
         self.client
-            .start_container::<String>(&name, None)
+            .start_container::<String>(&container_name, None)
             .await
             .expect("Could not start container via Docker daemon");
 
-        name
+        (response.id, container_name)
     }
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
@@ -328,9 +334,9 @@ impl ContainerEngine for DockerContainerEngine {
             .create_exec(
                 exec_params.container_name,
                 CreateExecOptions::<String> {
-                    attach_stdin: exec_params.attach_stdin,
-                    attach_stdout: exec_params.attach_stdout,
-                    attach_stderr: exec_params.attach_stderr,
+                    attach_stdin: Some(false),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
                     tty: Some(true),
                     env: Some(
                         exec_params

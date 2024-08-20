@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, io::Write, path::PathBuf};
 
 use crate::{
     container_engine::ExecParams,
@@ -25,28 +25,32 @@ pub async fn run_command(run_args: RunArgs) {
         })
         .collect::<HashMap<_, _>>();
 
-    let container_name = container_engine
+    let (container_id, container_name) = container_engine
         .start_container(build_script.container, extra_volumes)
         .await;
-    log::info!("Created and started container with name {container_name}");
+    log::info!("Created and started container with name {container_name} and ID {container_id}");
 
     for command in build_script.commands {
         let mut exec_params = ExecParams {
             container_name: &container_name,
+            container_id: &container_id,
             cmd: "".to_string(),
             uid: command.uid,
             gid: command.gid,
             working_dir: command.working_dir,
             privileged: command.privileged,
             env: command.env,
-            attach_stdout: command.attach_stdout,
-            attach_stderr: command.attach_stderr,
-            attach_stdin: command.attach_stdin,
         };
 
         if let Some(command_text) = command.command {
             log::info!("Exec-ing simple command inside container: \"{command_text}\"");
             exec_params.cmd = command_text;
+        }
+
+        if let Some(script_path) = command.script_path {
+            let actual_script_path = base_script_path.adjoin_absolute(&script_path);
+            log::info!("Exec-ing script inside container that is bind-mounted into: {actual_script_path:?}");
+            exec_params.cmd = actual_script_path.to_string_lossy().to_string();
         }
 
         let mut exec_reader = container_engine.exec_in_container(exec_params).await;

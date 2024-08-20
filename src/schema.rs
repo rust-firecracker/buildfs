@@ -80,12 +80,6 @@ pub struct BuildScriptCommand {
     pub privileged: Option<bool>,
     #[serde(default)]
     pub env: HashMap<String, String>,
-    #[serde(default)]
-    pub attach_stdout: Option<bool>,
-    #[serde(default)]
-    pub attach_stdin: Option<bool>,
-    #[serde(default)]
-    pub attach_stderr: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
