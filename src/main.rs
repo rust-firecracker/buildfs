@@ -3,11 +3,13 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dry_run::dry_run_command;
 use package::{pack_command, unpack_command};
+use run::run_command;
 use serde::{Deserialize, Serialize};
 
 mod container_engine;
 mod dry_run;
 mod package;
+mod run;
 mod schema;
 
 #[derive(Parser, Debug, Clone)]
@@ -102,6 +104,8 @@ async fn main() {
         CliCommand::DryRun { args } => {
             dry_run_command(args).await;
         }
-        CliCommand::Run { args: _ } => todo!(),
+        CliCommand::Run { args } => {
+            run_command(args).await;
+        }
     }
 }

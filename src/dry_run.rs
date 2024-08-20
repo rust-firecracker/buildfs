@@ -52,9 +52,15 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
     let references = build_script
         .commands
         .iter()
-        .filter(|command| command.script_path.is_some())
-        .map(|command| command.script_path.as_ref().unwrap())
+        .filter_map(|command| command.script_path.as_ref())
         .chain(build_script.overlays.iter().map(|overlay| &overlay.source))
+        .chain(
+            build_script
+                .container
+                .volumes
+                .iter()
+                .map(|(source_path, _)| source_path),
+        )
         .collect::<Vec<_>>();
 
     if let PackageType::BuildScript = package_type {
@@ -90,7 +96,7 @@ pub trait AdjoinAbsolute {
     fn adjoin_absolute(&self, other: &Path) -> PathBuf;
 }
 
-impl AdjoinAbsolute for Path {
+impl AdjoinAbsolute for PathBuf {
     fn adjoin_absolute(&self, other: &Path) -> PathBuf {
         let other = other.to_string_lossy();
         self.join(other.trim_start_matches("/"))

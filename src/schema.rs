@@ -32,6 +32,20 @@ pub struct BuildScriptContainer {
     pub rootful: bool,
     #[serde(default)]
     pub connection_uri: Option<String>,
+    #[serde(default)]
+    pub volumes: HashMap<PathBuf, PathBuf>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub oci_runtime: Option<String>,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default)]
+    pub cap_add: Option<Vec<String>>,
+    #[serde(default)]
+    pub cap_drop: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,7 +67,7 @@ pub struct BuildScriptCommand {
     #[serde(default)]
     pub privileged: Option<bool>,
     #[serde(default)]
-    pub env: Option<HashMap<String, String>>,
+    pub env: HashMap<String, String>,
     #[serde(default)]
     pub tty: Option<bool>,
 }
