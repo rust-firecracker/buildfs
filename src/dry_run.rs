@@ -10,16 +10,16 @@ use crate::{
 };
 
 pub async fn dry_run_command(dry_run_args: DryRunArgs) {
-    let (_, container_engine, _, _) = prepare_for_run(dry_run_args).await;
+    let (_, container_engine, _, _) = prepare_for_run(&dry_run_args).await;
     container_engine.ping().await;
 }
 
-pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf, bool) {
+pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf, bool) {
     let package_type = get_package_type(&dry_run_args.package).await;
     let mut can_delete = false;
 
     let (unpack_path, build_script_path) = match package_type {
-        PackageType::BuildScript => (dry_run_args.package.clone(), dry_run_args.package),
+        PackageType::BuildScript => (dry_run_args.package.clone(), dry_run_args.package.clone()),
         PackageType::Directory => (
             dry_run_args.package.clone(),
             dry_run_args.package.join(BUILD_SCRIPT_FILENAME),
@@ -28,7 +28,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
             can_delete = false;
             let tmp_path = PathBuf::from(format!("/tmp/{}", Uuid::new_v4()));
             unpack_command(UnpackArgs {
-                source_path: dry_run_args.package,
+                source_path: dry_run_args.package.clone(),
                 destination_path: tmp_path.clone(),
             })
             .await;
@@ -104,6 +104,12 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
     }
 
     log::debug!("Validated the build script: {} reference(s) found", references.len());
+
+    if let Some(block_size_mib) = build_script.filesystem.dd_block_size_mib {
+        if build_script.filesystem.size_mib % block_size_mib != 0 {
+            panic!("Build script validation failed: filesystem size (MB) must be divisible by dd block size (MB), and is not");
+        }
+    }
 
     (build_script, container_engine, unpack_path, can_delete)
 }

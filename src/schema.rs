@@ -16,14 +16,13 @@ pub struct BuildScript {
 
 #[derive(Deserialize, Debug)]
 pub struct BuildScriptFilesystem {
-    #[serde(default)]
-    pub preferred_name: Option<String>,
     #[serde(default, rename = "type")]
     pub filesystem_type: FilesystemType,
     pub size_mib: u32,
+    pub dd_block_size_mib: Option<u32>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BuildScriptContainer {
     #[serde(default)]
     pub engine: ContainerEngineType,
@@ -48,7 +47,7 @@ pub struct BuildScriptContainer {
     pub cap_drop: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BuildScriptContainerImage {
     pub name: String,
     pub tag: String,
@@ -106,7 +105,7 @@ pub struct Export {
     pub create: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, Clone)]
 pub enum ContainerEngineType {
     #[default]
     Docker,

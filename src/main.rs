@@ -73,12 +73,14 @@ pub struct DryRunArgs {
 pub struct RunArgs {
     #[command(flatten)]
     dry_run_args: DryRunArgs,
+    #[arg(long = "output", short = 'o', help = "The path to the produced root filesystem")]
+    output_path: PathBuf,
     #[arg(
-        long = "output",
-        short = 'o',
-        help = "The overridden path to the produced root filesystem"
+        long = "timeout",
+        short = 't',
+        help = "The timeout (in seconds) when deleting the container"
     )]
-    output_path: Option<PathBuf>,
+    timeout: Option<u64>,
 }
 
 #[derive(ValueEnum, Serialize, Deserialize, Clone, Copy, Default, Debug)]

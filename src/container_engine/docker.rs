@@ -2,12 +2,13 @@ use std::{collections::HashMap, path::PathBuf, pin::Pin};
 
 use async_trait::async_trait;
 use bollard::{
-    container::{Config, CreateContainerOptions, LogOutput},
+    container::{Config, CreateContainerOptions, LogOutput, RemoveContainerOptions, StopContainerOptions},
     exec::{CreateExecOptions, StartExecResults},
     secret::HostConfig,
     ClientVersion, Docker,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::schema::{BuildScriptContainer, BuildScriptContainerImage};
@@ -162,6 +163,42 @@ impl ContainerEngine for DockerContainerEngine {
         };
 
         Box::new(DockerExecReader { output })
+    }
+
+    async fn export_container(&self, container_name: &str, tar_path: &PathBuf) {
+        let mut stream = self.client.export_container(container_name);
+        let mut file = tokio::fs::File::options()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(tar_path)
+            .await
+            .expect("Could not open tarball file");
+
+        while let Some(result) = stream.next().await {
+            let bytes = result.expect("Could not stream contents of tarball while exporting Docker container");
+            file.write_all(&bytes)
+                .await
+                .expect("Could not write streamed-in content to tarball");
+        }
+    }
+
+    async fn remove_container(&self, container_name: &str, timeout: Option<u64>) {
+        self.client
+            .stop_container(container_name, timeout.map(|t| StopContainerOptions { t: t as i64 }))
+            .await
+            .expect("Could not stop container via Docker daemon");
+
+        self.client
+            .remove_container(
+                container_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("Could not remove container via Docker daemon");
     }
 }
 

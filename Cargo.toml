@@ -17,6 +17,7 @@ podman-rest-client = { version = "0.12.0", default-features = false, features = 
 ] }
 serde = { version = "1.0.208", features = ["derive"] }
 simple_logger = "5.0.0"
+sys-mount = { version = "3.0.1", default-features = false, features = [] }
 tar = "0.4.41"
 tokio = { version = "1.39.3", features = ["rt", "process", "macros", "fs"] }
 toml = "0.8.19"

@@ -5,7 +5,7 @@ use podman_rest_client::{
     v5::{
         apis::{Containers, Images, System},
         models::{BindOptions, Mount, SpecGenerator},
-        params::ImagePullLibpod,
+        params::{ContainerDeleteLibpod, ContainerStopLibpod, ImagePullLibpod},
     },
     PodmanRestClient,
 };
@@ -49,6 +49,12 @@ impl PodmanContainerEngine {
         Self {
             client: PodmanRestClient::new_unix(socket_path),
         }
+    }
+
+    fn get_podman_path() -> PathBuf {
+        let podman_path = which::which("podman").expect("Could not locate \"podman\" binary in PATH");
+        log::debug!("Located \"podman\" binary at {podman_path:?}");
+        podman_path
     }
 }
 
@@ -124,10 +130,7 @@ impl ContainerEngine for PodmanContainerEngine {
     }
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
-        let podman_path = which::which("podman").expect("Could not locate \"podman\" binary to perform exec via CLI");
-        log::debug!("Located \"podman\" binary at {podman_path:?}");
-
-        let mut command = Command::new(podman_path);
+        let mut command = Command::new(Self::get_podman_path());
         command.arg("exec");
 
         if let Some(uid_gid_string) = format_uid_gid_string(exec_params.uid, exec_params.gid) {
@@ -158,7 +161,9 @@ impl ContainerEngine for PodmanContainerEngine {
 
         command.stdout(Stdio::piped());
 
-        let mut child = command.spawn().expect("Could not spawn \"podman\" binary for exec");
+        let mut child = command
+            .spawn()
+            .expect("Could not fork \"podman\" binary for running \"podman exec\"");
         let stdout = child
             .stdout
             .take()
@@ -167,6 +172,47 @@ impl ContainerEngine for PodmanContainerEngine {
             child,
             stdout_reader: BufReader::new(stdout).lines(),
         })
+    }
+
+    async fn export_container(&self, container_name: &str, tar_path: &PathBuf) {
+        let mut command = Command::new(Self::get_podman_path());
+        command.arg("export");
+        command.arg("-o");
+        command.arg(tar_path);
+        command.arg(container_name);
+
+        let exit_status = command
+            .status()
+            .await
+            .expect("Could not fork \"podman\" binary for running \"podman export\"");
+        if !exit_status.success() {
+            panic!("Running \"podman export\" failed with exit status: {exit_status}");
+        }
+    }
+
+    async fn remove_container(&self, container_name: &str, timeout: Option<u64>) {
+        self.client
+            .container_stop_libpod(
+                container_name,
+                Some(ContainerStopLibpod {
+                    timeout: timeout.map(|t| t as i64),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("Could not stop container via libpod");
+
+        self.client
+            .container_delete_libpod(
+                container_name,
+                Some(ContainerDeleteLibpod {
+                    force: Some(true),
+                    timeout: timeout.map(|t| t as i64),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("Could not remove container via libpod");
     }
 }
 

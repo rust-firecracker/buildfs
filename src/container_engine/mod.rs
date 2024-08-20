@@ -20,6 +20,10 @@ pub trait ContainerEngine {
     ) -> (String, String);
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader>;
+
+    async fn export_container(&self, container_name: &str, tar_path: &PathBuf);
+
+    async fn remove_container(&self, container_name: &str, timeout: Option<u64>);
 }
 
 #[async_trait]
