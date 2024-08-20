@@ -14,19 +14,24 @@ pub async fn dry_run_command(dry_run_args: DryRunArgs) {
 }
 
 pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf) {
-    let unpack_path = PathBuf::from(format!("/tmp/{}", Uuid::new_v4()));
-
-    unpack_command(PackArgs {
-        source_path: dry_run_args.package,
-        destination_path: unpack_path.clone(),
-        package_type: dry_run_args.package_type,
-    })
-    .await;
-
-    let build_script_path = match dry_run_args.package_type {
-        PackageType::BuildScript => &unpack_path,
-        _ => &unpack_path.join(BUILD_SCRIPT_FILENAME),
+    let (unpack_path, build_script_path) = match dry_run_args.package_type {
+        PackageType::BuildScript => (dry_run_args.package.clone(), dry_run_args.package),
+        PackageType::Directory => (
+            dry_run_args.package.clone(),
+            dry_run_args.package.join(BUILD_SCRIPT_FILENAME),
+        ),
+        package_type => {
+            let tmp_path = PathBuf::from(format!("/tmp/{}", Uuid::new_v4()));
+            unpack_command(PackArgs {
+                source_path: dry_run_args.package,
+                destination_path: tmp_path.clone(),
+                package_type,
+            })
+            .await;
+            (tmp_path.clone(), tmp_path.join(BUILD_SCRIPT_FILENAME))
+        }
     };
+
     let build_script_json = tokio::fs::read_to_string(build_script_path)
         .await
         .expect("Could not read build script from temporary location");
@@ -47,7 +52,7 @@ pub async fn prepare_for_run(dry_run_args: DryRunArgs) -> (BuildScript, Box<dyn 
         .iter()
         .filter(|command| command.script_path.is_some())
         .map(|command| command.script_path.as_ref().unwrap())
-        .chain(build_script.overlays.iter().map(|overlay| &overlay.destination))
+        .chain(build_script.overlays.iter().map(|overlay| &overlay.source))
         .collect::<Vec<_>>();
 
     if let PackageType::BuildScript = dry_run_args.package_type {

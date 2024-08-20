@@ -29,9 +29,7 @@ pub async fn unpack_command(pack_args: PackArgs) {
                     .unpack(pack_args.destination_path)
                     .expect("Extracting package tar failed");
             }
-            _ => {
-                println!("The given package type cannot be unpacked as it wasn't packed in the first place");
-            }
+            _ => {}
         }
     })
     .await
