@@ -249,7 +249,13 @@ async fn init_rootfs(
         .await
         .expect("Could not create filesystem mount point directory");
     let unmount_drop = Mount::builder()
-        .fstype("ext4")
+        .fstype(match filesystem_type {
+            FilesystemType::Ext4 => "ext4",
+            FilesystemType::Btrfs => "btrfs",
+            FilesystemType::Squashfs => "squashfs",
+            FilesystemType::Vfat => "vfat",
+            FilesystemType::Xfs => "xfs",
+        })
         .mount_autodrop(&run_args.output_path, &rootfs_mount_path, UnmountFlags::empty())
         .expect("Could not mount rootfs");
 
