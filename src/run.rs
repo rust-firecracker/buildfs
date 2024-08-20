@@ -67,7 +67,7 @@ async fn pull_and_start_container(
     let mut inline_mount_paths = HashMap::new();
 
     for command in &build_script.commands {
-        if let Some(ref script) = command.script {
+        if let Some(ref script) = command.script_inline {
             let host_path = get_tmp_path();
             let mount_path = PathBuf::from(format!("/__scripts/{}", Uuid::new_v4()));
             tokio::fs::write(&host_path, script)
@@ -124,7 +124,7 @@ async fn run_commands_in_container(
             exec_params.cmd = actual_script_path.to_string_lossy().to_string();
         }
 
-        if let Some(script) = command.script {
+        if let Some(script) = command.script_inline {
             let (_, inline_script_path) = inline_mount_paths
                 .get(&script)
                 .expect("Could not resolve expectedly inserted mount path of an inlined script");

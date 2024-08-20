@@ -65,7 +65,7 @@ pub struct BuildScriptCommand {
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]
-    pub script: Option<String>,
+    pub script_inline: Option<String>,
     #[serde(default)]
     pub script_path: Option<PathBuf>,
     // options addable to any
@@ -83,7 +83,10 @@ pub struct BuildScriptCommand {
 
 #[derive(Deserialize, Debug)]
 pub struct BuildScriptOverlay {
-    pub source: PathBuf,
+    #[serde(default)]
+    pub source: Option<PathBuf>,
+    #[serde(default)]
+    pub source_inline: Option<String>,
     pub destination: PathBuf,
 }
 

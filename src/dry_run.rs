@@ -58,7 +58,12 @@ pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn
         .commands
         .iter()
         .filter_map(|command| command.script_path.as_ref())
-        .chain(build_script.overlays.iter().map(|overlay| &overlay.source))
+        .chain(
+            build_script
+                .overlays
+                .iter()
+                .filter_map(|overlay| overlay.source.as_ref()),
+        )
         .chain(
             build_script
                 .container
@@ -97,10 +102,19 @@ pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn
     let empty_commands = build_script
         .commands
         .iter()
-        .filter(|command| command.script.is_none() && command.script_path.is_none() && command.command.is_none())
+        .filter(|command| command.script_inline.is_none() && command.script_path.is_none() && command.command.is_none())
         .count();
     if empty_commands > 0 {
         panic!("Build script validation failed: {empty_commands} command(s) contain no reference to a script, a script path or an inline command");
+    }
+
+    let empty_overlays = build_script
+        .overlays
+        .iter()
+        .filter(|overlay| overlay.source.is_none() && overlay.source_inline.is_none())
+        .count();
+    if empty_overlays > 0 {
+        panic!("Build script validation failed: {empty_overlays} overlay(s) contain no references to a source path or an inline source");
     }
 
     log::debug!("Validated the build script: {} reference(s) found", references.len());

@@ -110,10 +110,14 @@ pub async fn pack_command(pack_args: PackArgs) {
         }
     }
 
-    for overlay in build_script.overlays {
+    for source_path in build_script
+        .overlays
+        .iter()
+        .filter_map(|overlay| overlay.source.as_ref())
+    {
         paths.insert(
-            source_parent_path.join(&overlay.source),
-            pack_args.destination_path.join(&overlay.source),
+            source_parent_path.join(source_path),
+            pack_args.destination_path.join(source_path),
         );
     }
 
