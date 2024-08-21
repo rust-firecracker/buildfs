@@ -150,6 +150,14 @@ fn main() {
 
     simple_logger::init_with_level(cli.log_level.into()).expect("Could not initialize simple_logger");
 
+    if std::env::consts::OS == "windows" {
+        panic!("buildfs cannot run on Windows due to a lack of mkfs tools!");
+    }
+
+    if std::env::consts::OS == "macos" {
+        log::warn!("Running buildfs on macOS is neither recommended nor supported. Proceed with heavy caution!!!");
+    }
+
     let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
     runtime_builder.enable_all();
     runtime_builder.worker_threads(cli.async_threads);
