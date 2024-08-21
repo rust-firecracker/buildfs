@@ -19,7 +19,11 @@ pub struct BuildScriptFilesystem {
     #[serde(default, rename = "type")]
     pub filesystem_type: FilesystemType,
     pub size_mib: u32,
-    pub dd_block_size_mib: Option<u32>,
+    pub block_size_mib: Option<u32>,
+    #[serde(default)]
+    pub dd_args: Vec<String>,
+    #[serde(default)]
+    pub mkfs_args: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -103,11 +107,9 @@ pub struct BuildScriptExport {
 #[derive(Deserialize, Debug, Default)]
 pub struct Export {
     #[serde(default)]
-    pub include: Vec<String>,
+    pub include: Vec<PathBuf>,
     #[serde(default)]
-    pub exclude: Vec<String>,
-    #[serde(default)]
-    pub create: Vec<String>,
+    pub create: Vec<PathBuf>,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]

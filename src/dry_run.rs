@@ -130,7 +130,7 @@ pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn
 
     log::debug!("Validated the build script: {} reference(s) found", references.len());
 
-    if let Some(block_size_mib) = build_script.filesystem.dd_block_size_mib {
+    if let Some(block_size_mib) = build_script.filesystem.block_size_mib {
         if build_script.filesystem.size_mib % block_size_mib != 0 {
             panic!("Build script validation failed: filesystem size (MB) must be divisible by dd block size (MB), and is not");
         }
