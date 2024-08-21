@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::Arc,
+};
 
 use sys_mount::{Mount, UnmountDrop, UnmountFlags};
 use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
@@ -13,7 +15,7 @@ use crate::{
     RunArgs,
 };
 
-pub async fn run_command(run_args: RunArgs) {
+pub async fn run_command(run_args: RunArgs, no_exec_logs: bool) {
     let (build_script, container_engine, unpack_path, can_delete_unpack_path) =
         prepare_for_run(&run_args.dry_run_args).await;
 
@@ -26,20 +28,21 @@ pub async fn run_command(run_args: RunArgs) {
         &container_id,
         &container_name,
         &container_engine,
+        no_exec_logs,
     )
     .await;
 
     let container_rootfs_path = export_and_remove_container(
         &container_engine,
         &container_name,
-        &run_args,
         can_delete_unpack_path,
         &unpack_path,
         inline_mount_paths,
+        build_script.container.wait_timeout_s,
     )
     .await;
 
-    let (rootfs_mount_path, unmount_drop) = init_rootfs(build_script.filesystem, &run_args).await;
+    let (rootfs_mount_path, unmount_drop) = init_rootfs(build_script.filesystem, &run_args, no_exec_logs).await;
 
     apply_overlays_and_finalize(
         Arc::new(container_rootfs_path),
@@ -106,6 +109,7 @@ async fn run_commands_in_container(
     container_id: &str,
     container_name: &str,
     container_engine: &Box<dyn ContainerEngine>,
+    no_exec_logs: bool,
 ) {
     let base_script_path = PathBuf::from("/__scripts");
 
@@ -142,7 +146,9 @@ async fn run_commands_in_container(
 
         let mut exec_reader = container_engine.exec_in_container(exec_params).await;
         while let Some(output) = exec_reader.read().await {
-            print!("{output}");
+            if !no_exec_logs {
+                print!("{output}");
+            }
         }
     }
 }
@@ -150,10 +156,10 @@ async fn run_commands_in_container(
 async fn export_and_remove_container(
     container_engine: &Box<dyn ContainerEngine>,
     container_name: &str,
-    run_args: &RunArgs,
     can_delete_unpack_path: bool,
     unpack_path: &PathBuf,
     inline_mount_paths: HashMap<String, (PathBuf, PathBuf)>,
+    wait_timeout: Option<u64>,
 ) -> PathBuf {
     let container_rootfs_tar_path = get_tmp_path();
     let container_rootfs_path = get_tmp_path();
@@ -178,9 +184,7 @@ async fn export_and_remove_container(
     .await
     .expect("Could not join on blocking task");
 
-    container_engine
-        .remove_container(&container_name, run_args.timeout)
-        .await;
+    container_engine.remove_container(&container_name, wait_timeout).await;
     log::info!("Stopped and removed container");
 
     let mut cleanup_join_set = JoinSet::new();
@@ -203,7 +207,11 @@ async fn export_and_remove_container(
     container_rootfs_path
 }
 
-async fn init_rootfs(filesystem: BuildScriptFilesystem, run_args: &RunArgs) -> (PathBuf, UnmountDrop<Mount>) {
+async fn init_rootfs(
+    filesystem: BuildScriptFilesystem,
+    run_args: &RunArgs,
+    no_exec_logs: bool,
+) -> (PathBuf, UnmountDrop<Mount>) {
     let dd_block_size_mib = match filesystem.block_size_mib {
         Some(mib) => mib,
         None => 1,
@@ -228,6 +236,11 @@ async fn init_rootfs(filesystem: BuildScriptFilesystem, run_args: &RunArgs) -> (
     dd_command.arg(format!("of={}", run_args.output_path.to_string_lossy()));
     dd_command.arg(format!("bs={}M", dd_block_size_mib));
     dd_command.arg(format!("count={}", filesystem.size_mib / dd_block_size_mib));
+    if no_exec_logs {
+        dd_command.stdout(Stdio::null());
+        dd_command.stderr(Stdio::null());
+    }
+
     let dd_exit_status = dd_command.status().await.expect("Failed to fork \"dd\" process");
 
     if !dd_exit_status.success() {
@@ -236,6 +249,11 @@ async fn init_rootfs(filesystem: BuildScriptFilesystem, run_args: &RunArgs) -> (
 
     let mut mkfs_command = Command::new(mkfs_path);
     mkfs_command.arg(run_args.output_path.to_string_lossy().to_string());
+    if no_exec_logs {
+        mkfs_command.stdout(Stdio::null());
+        mkfs_command.stderr(Stdio::null());
+    }
+
     let mkfs_exit_status = mkfs_command.status().await.expect("Failed to fork \"mkfs\" process");
 
     if !mkfs_exit_status.success() {
@@ -379,7 +397,7 @@ async fn apply_overlays_and_finalize(
     }
 
     log::info!(
-        "Spawned {} worker threads for exporting into the mounted filesystem",
+        "Spawned {} threads for exporting into the mounted filesystem",
         join_set.len()
     );
 

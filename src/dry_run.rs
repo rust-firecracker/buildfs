@@ -12,6 +12,7 @@ use crate::{
 pub async fn dry_run_command(dry_run_args: DryRunArgs) {
     let (_, container_engine, _, _) = prepare_for_run(&dry_run_args).await;
     container_engine.ping().await;
+    log::info!("Dry run completed successfully");
 }
 
 pub async fn prepare_for_run(dry_run_args: &DryRunArgs) -> (BuildScript, Box<dyn ContainerEngine>, PathBuf, bool) {

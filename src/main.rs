@@ -2,7 +2,6 @@ use std::{fmt::Display, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dry_run::dry_run_command;
-use log::Level;
 use package::{pack_command, unpack_command};
 use run::run_command;
 use serde::{Deserialize, Serialize};
@@ -22,6 +21,32 @@ pub mod schema;
 pub struct Cli {
     #[command(subcommand)]
     pub command: CliCommand,
+    #[arg(
+        short = 'A',
+        long = "async-threads",
+        help = "The amount of asynchronous threads to give to Tokio",
+        default_value_t = 1
+    )]
+    pub async_threads: usize,
+    #[arg(
+        short = 'B',
+        long = "max-blocking-threads",
+        help = "The limit to the amount of blocking threads for Tokio. Setting this limit may degrade file I/O performance!"
+    )]
+    pub max_blocking_threads: Option<usize>,
+    #[arg(
+        short = 'l',
+        long = "log-level",
+        help = "The level to set for logging",
+        default_value = "info"
+    )]
+    pub log_level: LogLevel,
+    #[arg(
+        short = 'e',
+        long = "no-exec-logs",
+        help = "Disable logging of the output of scripts run inside the container"
+    )]
+    pub no_exec_logs: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -75,12 +100,6 @@ pub struct RunArgs {
     dry_run_args: DryRunArgs,
     #[arg(long = "output", short = 'o', help = "The path to the produced root filesystem")]
     output_path: PathBuf,
-    #[arg(
-        long = "timeout",
-        short = 't',
-        help = "The timeout (in seconds) when deleting the container"
-    )]
-    timeout: Option<u64>,
 }
 
 #[derive(ValueEnum, Serialize, Deserialize, Clone, Copy, Default, Debug)]
@@ -91,6 +110,28 @@ pub enum PackageType {
     Directory,
     #[default]
     BuildScript,
+}
+
+#[derive(ValueEnum, Serialize, Deserialize, Clone, Copy, Default, Debug)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+impl From<LogLevel> for log::Level {
+    fn from(value: LogLevel) -> Self {
+        match value {
+            LogLevel::Trace => log::Level::Trace,
+            LogLevel::Debug => log::Level::Debug,
+            LogLevel::Info => log::Level::Info,
+            LogLevel::Warn => log::Level::Warn,
+            LogLevel::Error => log::Level::Error,
+        }
+    }
 }
 
 impl Display for PackageType {
@@ -104,24 +145,36 @@ impl Display for PackageType {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    simple_logger::init_with_level(Level::Debug).expect("Could not initialize simple_logger");
-
+fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
-        CliCommand::Pack { args } => {
-            pack_command(args).await;
-        }
-        CliCommand::Unpack { args } => {
-            unpack_command(args).await;
-        }
-        CliCommand::DryRun { args } => {
-            dry_run_command(args).await;
-        }
-        CliCommand::Run { args } => {
-            run_command(args).await;
-        }
+    simple_logger::init_with_level(cli.log_level.into()).expect("Could not initialize simple_logger");
+
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    runtime_builder.enable_io();
+    runtime_builder.worker_threads(cli.async_threads);
+
+    if let Some(max_blocking_threads) = cli.max_blocking_threads {
+        runtime_builder.max_blocking_threads(max_blocking_threads);
     }
+
+    runtime_builder
+        .build()
+        .expect("Could not start Tokio runtime")
+        .block_on(async {
+            match cli.command {
+                CliCommand::Pack { args } => {
+                    pack_command(args).await;
+                }
+                CliCommand::Unpack { args } => {
+                    unpack_command(args).await;
+                }
+                CliCommand::DryRun { args } => {
+                    dry_run_command(args).await;
+                }
+                CliCommand::Run { args } => {
+                    run_command(args, cli.no_exec_logs).await;
+                }
+            }
+        });
 }

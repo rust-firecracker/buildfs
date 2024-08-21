@@ -34,6 +34,8 @@ pub struct BuildScriptContainer {
     #[serde(default)]
     pub rootful: bool,
     #[serde(default)]
+    pub wait_timeout_s: Option<u64>,
+    #[serde(default)]
     pub connection_uri: Option<String>,
     #[serde(default)]
     pub volumes: HashMap<PathBuf, PathBuf>,
