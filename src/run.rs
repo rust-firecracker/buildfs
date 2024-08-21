@@ -324,15 +324,20 @@ async fn apply_overlays_and_finalize(
 
     for dir_path in export.directories.include {
         let (source_path, destination_path) = (source_path.clone(), destination_path.clone());
-        join_set.spawn_blocking(move || {
-            std::fs::create_dir_all(destination_path.adjoin_absolute(&dir_path))
-                .expect("Could not create directory tree for export-included directory");
-            fs_extra::dir::move_dir(
-                source_path.adjoin_absolute(&dir_path),
-                destination_path.adjoin_absolute(&dir_path).parent().unwrap(),
-                &fs_extra::dir::CopyOptions::default(),
-            )
-            .expect("Could not move directory tree for export-included directory");
+        join_set.spawn(async move {
+            let mut command = Command::new(which::which("cp").expect("Could not locate \"cp\" binary in PATH"));
+            command.arg("-r");
+            command.arg("-p");
+            command.arg(source_path.adjoin_absolute(&dir_path));
+            command.arg(destination_path.adjoin_absolute(&dir_path).parent().unwrap());
+            let exit_status = command
+                .status()
+                .await
+                .expect("Could not fork \"cp\" to perform recursive copy");
+
+            if !exit_status.success() {
+                panic!("\"cp\" exited with non-zero exit status: {exit_status}");
+            }
         });
     }
 
@@ -384,6 +389,11 @@ async fn apply_overlays_and_finalize(
 
     drop(unmount_drop);
     log::info!("All export threads finished execution, filesystem unmounted");
+
+    tokio::fs::remove_dir_all(source_path.as_path())
+        .await
+        .expect("Could not clean up unneeded container rootfs directory");
+    log::info!("Root filesystem creation finished normally");
 }
 
 fn get_tmp_path() -> PathBuf {
