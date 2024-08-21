@@ -240,6 +240,7 @@ async fn init_rootfs(
         dd_command.stdout(Stdio::null());
         dd_command.stderr(Stdio::null());
     }
+    dd_command.args(filesystem.dd_args);
 
     let dd_exit_status = dd_command.status().await.expect("Failed to fork \"dd\" process");
 
@@ -253,6 +254,7 @@ async fn init_rootfs(
         mkfs_command.stdout(Stdio::null());
         mkfs_command.stderr(Stdio::null());
     }
+    mkfs_command.args(filesystem.mkfs_args);
 
     let mkfs_exit_status = mkfs_command.status().await.expect("Failed to fork \"mkfs\" process");
 
