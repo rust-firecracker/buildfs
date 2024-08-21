@@ -2,6 +2,12 @@
 name = "buildfs"
 version = "0.1.0"
 edition = "2021"
+description = "A CI-compatible CLI utility that can create root filesystem images (for use in virtual machines) from reproducible and readable TOML build scripts"
+license = "MIT"
+keywords = ["firecracker", "cli", "rootfs", "docker", "podman"]
+categories = ["virtualization", "filesystem", "command-line-utilities"]
+repository = "https://github.com/kanpov/buildfs"
+readme = "README.md"
 
 [dependencies]
 async-trait = "0.1.81"
