@@ -151,7 +151,7 @@ fn main() {
     simple_logger::init_with_level(cli.log_level.into()).expect("Could not initialize simple_logger");
 
     let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
-    runtime_builder.enable_io();
+    runtime_builder.enable_all();
     runtime_builder.worker_threads(cli.async_threads);
 
     if let Some(max_blocking_threads) = cli.max_blocking_threads {
