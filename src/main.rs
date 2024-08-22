@@ -44,7 +44,7 @@ pub struct Cli {
     #[arg(
         short = 'e',
         long = "no-exec-logs",
-        help = "Disable logging of the output of scripts run inside the container"
+        help = "Disable logging of the output of scripts run inside the container, and pipe \"dd\" and \"mkfs\" output to /dev/null"
     )]
     pub no_exec_logs: bool,
 }

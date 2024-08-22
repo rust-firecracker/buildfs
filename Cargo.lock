@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "buildfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bollard",
@@ -1022,11 +1022,13 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "podman-rest-client"
-version = "0.12.0"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e50dc59fe1cc7e78510c03e67a65737862ff23175035ac31ab04bb545761bb1b"
+checksum = "ce88bc2079b00f3443f1bdcd427be153318ad12a4fe7481d9d39a517219f0d7d"
 dependencies = [
  "async-trait",
+ "bytes",
+ "futures",
  "http",
  "http-body-util",
  "hyper",
