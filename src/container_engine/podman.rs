@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, process::Stdio};
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use podman_rest_client::{
     v5::{
         apis::{Containers, Images, System},
@@ -10,7 +11,7 @@ use podman_rest_client::{
     PodmanRestClient,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdout, Command},
 };
 use uuid::Uuid;
@@ -175,18 +176,20 @@ impl ContainerEngine for PodmanContainerEngine {
     }
 
     async fn export_container(&self, container_name: &str, tar_path: &PathBuf) {
-        let mut command = Command::new(Self::get_podman_path());
-        command.arg("export");
-        command.arg("-o");
-        command.arg(tar_path);
-        command.arg(container_name);
-
-        let exit_status = command
-            .status()
+        let mut file = tokio::fs::File::options()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(tar_path)
             .await
-            .expect("Could not fork \"podman\" binary for running \"podman export\"");
-        if !exit_status.success() {
-            panic!("Running \"podman export\" failed with exit status: {exit_status}");
+            .expect("Could not open export tarball file");
+        let mut stream = self.client.container_export_libpod(container_name);
+
+        while let Some(bytes_result) = stream.next().await {
+            let bytes = bytes_result.expect("Could not receive bytes streamed-in from libpod");
+            file.write_all(&bytes)
+                .await
+                .expect("Could not write streamed-in tar contents to file");
         }
     }
 
