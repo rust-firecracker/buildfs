@@ -20,7 +20,7 @@ use crate::{
     schema::{BuildScriptContainer, BuildScriptContainerImage},
 };
 
-use super::{ContainerEngine, ExecParams, ExecReader};
+use super::{ContainerEngine, ExecParams, ExecReader, StreamType};
 
 pub struct PodmanContainerEngine {
     client: PodmanRestClient,
@@ -218,13 +218,14 @@ struct PodmanExecReader {
 
 #[async_trait]
 impl ExecReader for PodmanExecReader {
-    async fn read(&mut self) -> Option<String> {
+    async fn read(&mut self) -> Option<(String, StreamType)> {
         let attach_frame = self.stream.next().await?.ok()?;
-        let bytes = match attach_frame {
-            AttachFrame::Stdin(bytes) => bytes,
-            AttachFrame::Stdout(bytes) => bytes,
-            AttachFrame::Stderr(bytes) => bytes,
+        let (bytes, stream_type) = match attach_frame {
+            AttachFrame::Stdin(bytes) => (bytes, StreamType::Stdin),
+            AttachFrame::Stdout(bytes) => (bytes, StreamType::Stdout),
+            AttachFrame::Stderr(bytes) => (bytes, StreamType::Stderr),
         };
-        Some(String::from_utf8_lossy(&bytes).into_owned())
+
+        Some((String::from_utf8_lossy(&bytes).into_owned(), stream_type))
     }
 }

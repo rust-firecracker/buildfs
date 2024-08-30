@@ -26,9 +26,16 @@ pub trait ContainerEngine {
     async fn remove_container(&self, container_name: &str, timeout: Option<u64>);
 }
 
+pub enum StreamType {
+    Stdout,
+    Stdin,
+    Stderr,
+    Unknown,
+}
+
 #[async_trait]
 pub trait ExecReader {
-    async fn read(&mut self) -> Option<String>;
+    async fn read(&mut self) -> Option<(String, StreamType)>;
 }
 
 pub struct ExecParams<'a> {

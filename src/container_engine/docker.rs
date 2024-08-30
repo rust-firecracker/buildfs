@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::schema::{BuildScriptContainer, BuildScriptContainerImage};
 
-use super::{format_uid_gid_string, ContainerEngine, ExecParams, ExecReader};
+use super::{format_uid_gid_string, ContainerEngine, ExecParams, ExecReader, StreamType};
 
 pub struct DockerContainerEngine {
     client: Docker,
@@ -152,7 +152,7 @@ impl ContainerEngine for DockerContainerEngine {
             .await
             .expect("Could not create exec via Docker daemon");
 
-        let output = match self
+        let stream = match self
             .client
             .start_exec(&response.id, None)
             .await
@@ -162,7 +162,7 @@ impl ContainerEngine for DockerContainerEngine {
             StartExecResults::Detached => panic!("Attaching to Docker daemon exec failed"),
         };
 
-        Box::new(DockerExecReader { output })
+        Box::new(DockerExecReader { stream })
     }
 
     async fn export_container(&self, container_name: &str, tar_path: &PathBuf) {
@@ -203,23 +203,19 @@ impl ContainerEngine for DockerContainerEngine {
 }
 
 struct DockerExecReader {
-    output: Pin<Box<dyn Stream<Item = Result<LogOutput, bollard::errors::Error>> + Send>>,
+    stream: Pin<Box<dyn Stream<Item = Result<LogOutput, bollard::errors::Error>> + Send>>,
 }
 
 #[async_trait]
 impl ExecReader for DockerExecReader {
-    async fn read(&mut self) -> Option<String> {
-        let bytes = match self.output.try_next().await.ok()?? {
-            LogOutput::StdErr { message } => {
-                log::error!(
-                    "Docker daemon exec received output from stderr, meaning something in your script went wrong"
-                );
-                message
-            }
-            LogOutput::StdOut { message } => message,
-            LogOutput::StdIn { message } => message,
-            LogOutput::Console { message } => message,
+    async fn read(&mut self) -> Option<(String, StreamType)> {
+        let (bytes, stream_type) = match self.stream.try_next().await.ok()?? {
+            LogOutput::StdErr { message } => (message, StreamType::Stderr),
+            LogOutput::StdOut { message } => (message, StreamType::Stdout),
+            LogOutput::StdIn { message } => (message, StreamType::Stdin),
+            LogOutput::Console { message } => (message, StreamType::Unknown),
         };
-        String::from_utf8(bytes.to_vec()).ok()
+
+        Some((String::from_utf8_lossy(&bytes).into_owned(), stream_type))
     }
 }

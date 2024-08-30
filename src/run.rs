@@ -2,12 +2,13 @@ use std::{
     collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::Arc,
 };
 
+use colored::Colorize;
 use sys_mount::{Mount, UnmountDrop, UnmountFlags};
 use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
 use uuid::Uuid;
 
 use crate::{
-    container_engine::{ContainerEngine, ExecParams},
+    container_engine::{ContainerEngine, ExecParams, StreamType},
     dry_run::{prepare_for_run, AdjoinAbsolute},
     schema::{
         BuildScript, BuildScriptCommand, BuildScriptExport, BuildScriptFilesystem, BuildScriptOverlay, FilesystemType,
@@ -145,9 +146,20 @@ async fn run_commands_in_container(
         }
 
         let mut exec_reader = container_engine.exec_in_container(exec_params).await;
-        while let Some(output) = exec_reader.read().await {
-            if !no_exec_logs {
-                print!("{output}");
+        while let Some((mut output, stream_type)) = exec_reader.read().await {
+            if !no_exec_logs && !output.trim().is_empty() {
+                let prefix = match stream_type {
+                    StreamType::Stdout => "stdout".green(),
+                    StreamType::Stdin => "stdin".blue(),
+                    StreamType::Stderr => "stderr".red(),
+                    StreamType::Unknown => "unknown".bright_black(),
+                };
+
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+
+                print!("{prefix}: {output}");
             }
         }
     }
