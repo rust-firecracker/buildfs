@@ -1,19 +1,18 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio};
+use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
 use podman_rest_client::{
     v5::{
-        apis::{Containers, Images, System},
-        models::{BindOptions, Mount, SpecGenerator},
+        apis::{Containers, Exec, Images, System},
+        models::{BindOptions, ContainerExecLibpodBody, ExecStartLibpodBody, Mount, SpecGenerator},
         params::{ContainerDeleteLibpod, ContainerStopLibpod, ImagePullLibpod},
     },
-    PodmanRestClient,
+    AttachFrame, AttachFrameStream, PodmanRestClient,
 };
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
-    process::{Child, ChildStdout, Command},
-};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::{
@@ -50,12 +49,6 @@ impl PodmanContainerEngine {
         Self {
             client: PodmanRestClient::new_unix(socket_path),
         }
-    }
-
-    fn get_podman_path() -> PathBuf {
-        let podman_path = which::which("podman").expect("Could not locate \"podman\" binary in PATH");
-        log::debug!("Located \"podman\" binary at {podman_path:?}");
-        podman_path
     }
 }
 
@@ -131,48 +124,48 @@ impl ContainerEngine for PodmanContainerEngine {
     }
 
     async fn exec_in_container(&self, exec_params: ExecParams<'_>) -> Box<dyn ExecReader> {
-        let mut command = Command::new(Self::get_podman_path());
-        command.arg("exec");
+        let cmd_parts = exec_params
+            .cmd
+            .split_whitespace()
+            .map(|slice| slice.to_owned())
+            .collect::<Vec<_>>();
 
-        if let Some(uid_gid_string) = format_uid_gid_string(exec_params.uid, exec_params.gid) {
-            command.arg("--user");
-            command.arg(uid_gid_string);
-        }
+        let exec_id = self
+            .client
+            .container_exec_libpod(
+                &exec_params.container_id,
+                ContainerExecLibpodBody {
+                    attach_stdout: Some(true),
+                    attach_stdin: Some(false),
+                    attach_stderr: Some(true),
+                    cmd: Some(cmd_parts),
+                    user: format_uid_gid_string(exec_params.uid, exec_params.gid),
+                    working_dir: exec_params
+                        .working_dir
+                        .map(|path_buf| path_buf.to_string_lossy().into_owned()),
+                    privileged: exec_params.privileged,
+                    env: Some(exec_params.env.into_iter().map(|(k, v)| format!("{k}={v}")).collect()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Could not create exec via libpod")
+            .id;
 
-        command.arg("--tty");
+        let exec_io = self
+            .client
+            .exec_start_libpod(
+                &exec_id,
+                ExecStartLibpodBody {
+                    detach: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Could not start exec via libpod");
+        let stream = AttachFrameStream::new(exec_io);
 
-        if let Some(working_dir) = exec_params.working_dir {
-            command.arg("--workdir");
-            command.arg(working_dir);
-        }
-
-        if let Some(true) = exec_params.privileged {
-            command.arg("--privileged");
-        }
-
-        for (env_key, env_value) in exec_params.env {
-            command.arg(format!("--env={env_key}={env_value}"));
-        }
-
-        command.arg(exec_params.container_id);
-
-        for segment in exec_params.cmd.split_whitespace() {
-            command.arg(segment);
-        }
-
-        command.stdout(Stdio::piped());
-
-        let mut child = command
-            .spawn()
-            .expect("Could not fork \"podman\" binary for running \"podman exec\"");
-        let stdout = child
-            .stdout
-            .take()
-            .expect("Could not pipe stdout of \"podman\" binary for reading exec output");
-        Box::new(PodmanExecReader {
-            child,
-            stdout_reader: BufReader::new(stdout).lines(),
-        })
+        Box::new(PodmanExecReader { stream })
     }
 
     async fn export_container(&self, container_name: &str, tar_path: &PathBuf) {
@@ -220,21 +213,18 @@ impl ContainerEngine for PodmanContainerEngine {
 }
 
 struct PodmanExecReader {
-    child: Child,
-    stdout_reader: Lines<BufReader<ChildStdout>>,
+    stream: AttachFrameStream<TokioIo<Upgraded>>,
 }
 
 #[async_trait]
 impl ExecReader for PodmanExecReader {
     async fn read(&mut self) -> Option<String> {
-        if let Ok(Some(exit_status)) = self.child.try_wait() {
-            if !exit_status.success() {
-                log::error!("Podman exec CLI command exited with non-zero status: {exit_status}");
-            }
-
-            return None;
-        }
-
-        self.stdout_reader.next_line().await.ok()?.map(|s| s + "\n")
+        let attach_frame = self.stream.next().await?.ok()?;
+        let bytes = match attach_frame {
+            AttachFrame::Stdin(bytes) => bytes,
+            AttachFrame::Stdout(bytes) => bytes,
+            AttachFrame::Stderr(bytes) => bytes,
+        };
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 }
