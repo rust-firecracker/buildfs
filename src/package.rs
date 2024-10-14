@@ -126,10 +126,10 @@ pub async fn pack_command(pack_args: PackArgs) {
         copy_join_set.spawn_blocking(move || std::fs::copy(src_path, dst_path));
     }
 
-    while let Some(Ok(result)) = copy_join_set.join_next().await {
-        if let Err(err) = result {
-            panic!("Copy task failed: {err}");
-        }
+    while let Some(result) = copy_join_set.join_next().await {
+        result
+            .expect("Joining on copy blocking task failed")
+            .expect("Copy blocking task failed");
     }
 
     if let PackageType::Directory = pack_args.package_type {

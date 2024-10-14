@@ -1,6 +1,6 @@
 [package]
 name = "buildfs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A CI-compatible CLI utility that can create root filesystem images (for use in virtual machines) from reproducible and readable TOML build scripts"
 license = "MIT"
@@ -9,26 +9,31 @@ categories = ["virtualization", "filesystem", "command-line-utilities"]
 repository = "https://github.com/kanpov/buildfs"
 readme = "README.md"
 
+[profile.release]
+lto = "fat"
+strip = "symbols"
+codegen-units = 1
+
 [dependencies]
-async-trait = "0.1.81"
+async-trait = "0.1.83"
 bollard = { version = "0.17.1" }
-clap = { version = "4.5.16", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 colored = "2.1.0"
-flate2 = "1.0.33"
+flate2 = "1.0.34"
 fs_extra = "1.3.0"
-futures = "0.3.30"
+futures = "0.3.31"
 hyper = "1.4.1"
-hyper-util = { version = "0.1.7", features = ["tokio"] }
-libc = "0.2.158"
+hyper-util = { version = "0.1.9", features = ["tokio"] }
+libc = "0.2.159"
 log = "0.4.22"
 podman-rest-client = { version = "0.13.0", default-features = false, features = [
     "v5",
     "uds",
 ] }
-serde = { version = "1.0.209", features = ["derive"] }
+serde = { version = "1.0.210", features = ["derive"] }
 simple_logger = "5.0.0"
 sys-mount = "3.0.1"
-tar = "0.4.41"
+tar = "0.4.42"
 tokio = { version = "1.40.0", features = [
     "rt-multi-thread",
     "process",
