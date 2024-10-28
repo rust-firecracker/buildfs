@@ -14,7 +14,7 @@ pub mod schema;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
-    version = "0.1",
+    version = "0.3.1",
     about = "A tool for declarative creation of root filesystem images",
     propagate_version = true
 )]

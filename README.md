@@ -3,6 +3,8 @@
 `buildfs` is an easy-to-use CLI tool meant for both manual and automated (CI) use to create raw filesystem (**rootfs**) images that can be used to boot virtual machines.
 It has 4 subcommands: `pack` and `unpack` to manage packages, `dry-run` to test the correctness of a package and `run` to actually fully execute the package. A package can be a single TOML build script, a directory with the build script and references to other resources, or such a directory compressed in either a `.tar` or a `.tar.gz`.
 
+**MSRV: Rust 1.80.0**.
+
 ### Getting started
 
 1. `cargo install buildfs`.
