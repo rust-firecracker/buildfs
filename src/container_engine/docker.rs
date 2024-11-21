@@ -7,7 +7,7 @@ use bollard::{
     secret::HostConfig,
     ClientVersion, Docker,
 };
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures_util::{Stream, StreamExt, TryStreamExt};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 

@@ -1,14 +1,14 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures_util::StreamExt;
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
 use podman_rest_client::{
     v5::{
         apis::{Containers, Exec, Images, System},
         models::{BindOptions, ContainerExecLibpodBody, ExecStartLibpodBody, Mount, SpecGenerator},
-        params::{ContainerDeleteLibpod, ContainerStopLibpod, ImagePullLibpod},
+        params::{ContainerStopLibpod, ImagePullLibpod},
     },
     AttachFrame, AttachFrameStream, PodmanRestClient,
 };
@@ -197,18 +197,6 @@ impl ContainerEngine for PodmanContainerEngine {
             )
             .await
             .expect("Could not stop container via libpod");
-
-        self.client
-            .container_delete_libpod(
-                container_name,
-                Some(ContainerDeleteLibpod {
-                    force: Some(true),
-                    timeout: timeout.map(|t| t as i64),
-                    ..Default::default()
-                }),
-            )
-            .await
-            .expect("Could not remove container via libpod");
     }
 }
 
