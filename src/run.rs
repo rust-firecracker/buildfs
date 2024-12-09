@@ -68,7 +68,7 @@ async fn pull_and_start_container(
     let mut volumes = build_script
         .commands
         .iter()
-        .filter_map(|command| command.script_path.clone())
+        .filter_map(|command| command.script_path.as_ref())
         .map(|script_path| {
             (
                 unpack_path.adjoin_absolute(&script_path),
@@ -81,7 +81,7 @@ async fn pull_and_start_container(
     for command in &build_script.commands {
         if let Some(ref script) = command.script_inline {
             let host_path = get_tmp_path();
-            let mount_path = PathBuf::from(format!("/__scripts/{}", Uuid::new_v4()));
+            let mount_path = base_script_path.join(Uuid::new_v4().to_string());
             tokio::fs::write(&host_path, script)
                 .await
                 .expect("Could not write inline script to a bind-mounted host path");
@@ -94,7 +94,21 @@ async fn pull_and_start_container(
         }
     }
 
-    log::debug!("Resolved script volumes fBuildScriptor container to: {volumes:?}");
+    for overlay in &build_script.overlays {
+        if overlay.mounted {
+            if let Some(ref source_inline) = overlay.source_inline {
+                let source_path = get_tmp_path();
+                tokio::fs::write(&source_path, source_inline)
+                    .await
+                    .expect("Could not write inline pre overlay to a bind-mounted host path");
+                volumes.insert(source_path, overlay.destination.clone());
+            } else if let Some(ref source_path) = overlay.source {
+                volumes.insert(unpack_path.adjoin_absolute(source_path), overlay.destination.clone());
+            }
+        }
+    }
+
+    log::debug!("Resolved container volumes to: {volumes:?}");
 
     let (container_id, container_name) = container_engine
         .start_container(build_script.container.clone(), volumes)
@@ -304,53 +318,14 @@ async fn apply_overlays_and_finalize(
     unpack_path: Arc<PathBuf>,
     unmount_drop: UnmountDrop<Mount>,
 ) {
-    for overlay in overlays {
-        if overlay.is_directory {
-            let (unpack_path, destination_path) = (unpack_path.clone(), destination_path.clone());
+    apply_overlays(
+        overlays.iter().filter(|overlay| !overlay.mounted).cloned().collect(),
+        unpack_path.clone(),
+        destination_path.clone(),
+    )
+    .await;
 
-            tokio::task::spawn_blocking(move || {
-                fs_extra::dir::copy(
-                    unpack_path.adjoin_absolute(&overlay.source.unwrap()),
-                    destination_path.adjoin_absolute(&overlay.destination),
-                    &fs_extra::dir::CopyOptions::default(),
-                )
-            })
-            .await
-            .expect("Join on blocking task failed")
-            .expect("Recursively copying overlay failed");
-
-            continue;
-        }
-
-        if let Some(parent_path) = overlay.destination.parent() {
-            tokio::fs::create_dir_all(destination_path.adjoin_absolute(parent_path))
-                .await
-                .expect("Could not create parent directory tree for overlayed file");
-        }
-
-        if let Some(source_path) = overlay.source {
-            tokio::fs::copy(
-                unpack_path.adjoin_absolute(&source_path),
-                destination_path.adjoin_absolute(&overlay.destination),
-            )
-            .await
-            .expect("Could not copy overlayed file");
-        }
-
-        if let Some(source_inline) = overlay.source_inline {
-            let mut file = tokio::fs::File::options()
-                .create_new(true)
-                .write(true)
-                .open(destination_path.adjoin_absolute(&overlay.destination))
-                .await
-                .expect("Could not create and open overlayed inline file");
-            file.write_all(source_inline.as_bytes())
-                .await
-                .expect("Could not write overlayed inline file's contents");
-        }
-    }
-
-    log::info!("Applied all overlays to the mounted filesystem");
+    log::info!("Applied non-mounted overlays to the mounted filesystem");
 
     let mut join_set = JoinSet::new();
 
@@ -419,13 +394,70 @@ async fn apply_overlays_and_finalize(
         result.expect("Could not join on blocking I/O task");
     }
 
+    log::info!("All export threads finished execution");
+
+    apply_overlays(
+        overlays.iter().filter(|overlay| overlay.mounted).cloned().collect(),
+        unpack_path.clone(),
+        destination_path.clone(),
+    )
+    .await;
+
     drop(unmount_drop);
-    log::info!("All export threads finished execution, filesystem unmounted");
+    log::info!("Applied mounted overlays to the mounted filesystem, filesystem unmounted");
 
     tokio::fs::remove_dir_all(source_path.as_path())
         .await
         .expect("Could not clean up unneeded container rootfs directory");
     log::info!("Root filesystem creation finished normally");
+}
+
+async fn apply_overlays(overlays: Vec<BuildScriptOverlay>, unpack_path: Arc<PathBuf>, destination_path: Arc<PathBuf>) {
+    for overlay in overlays {
+        if overlay.is_directory {
+            let (unpack_path, destination_path) = (unpack_path.clone(), destination_path.clone());
+
+            tokio::task::spawn_blocking(move || {
+                fs_extra::dir::copy(
+                    unpack_path.adjoin_absolute(&overlay.source.unwrap()),
+                    destination_path.adjoin_absolute(&overlay.destination),
+                    &fs_extra::dir::CopyOptions::default(),
+                )
+            })
+            .await
+            .expect("Join on blocking task failed")
+            .expect("Recursively copying overlay failed");
+
+            continue;
+        }
+
+        if let Some(parent_path) = overlay.destination.parent() {
+            tokio::fs::create_dir_all(destination_path.adjoin_absolute(parent_path))
+                .await
+                .expect("Could not create parent directory tree for overlayed file");
+        }
+
+        if let Some(source_path) = overlay.source {
+            tokio::fs::copy(
+                unpack_path.adjoin_absolute(&source_path),
+                destination_path.adjoin_absolute(&overlay.destination),
+            )
+            .await
+            .expect("Could not copy overlayed file");
+        }
+
+        if let Some(source_inline) = overlay.source_inline {
+            let mut file = tokio::fs::File::options()
+                .create_new(true)
+                .write(true)
+                .open(destination_path.adjoin_absolute(&overlay.destination))
+                .await
+                .expect("Could not create and open overlayed inline file");
+            file.write_all(source_inline.as_bytes())
+                .await
+                .expect("Could not write overlayed inline file's contents");
+        }
+    }
 }
 
 fn get_tmp_path() -> PathBuf {

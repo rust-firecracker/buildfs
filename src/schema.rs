@@ -87,7 +87,7 @@ pub struct BuildScriptCommand {
     pub env: HashMap<String, String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BuildScriptOverlay {
     #[serde(default)]
     pub source: Option<PathBuf>,
@@ -96,6 +96,8 @@ pub struct BuildScriptOverlay {
     pub destination: PathBuf,
     #[serde(default)]
     pub is_directory: bool,
+    #[serde(default)]
+    pub mounted: bool,
 }
 
 #[derive(Deserialize, Debug, Default)]
